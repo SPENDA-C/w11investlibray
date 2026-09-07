@@ -86,7 +86,7 @@ export function lpPage(o: LpOptions): string {
       <ul class="nav-list">
         <li><a class="nav-link" href="#problem">課題</a></li>
         <li><a class="nav-link" href="#about">できること</a></li>
-        <li><a class="nav-link" href="#nots">やらないこと</a></li>
+        <li><a class="nav-link" href="#nots">他社との違い</a></li>
         <li><a class="nav-link" href="#status">公開の段階</a></li>
         <li><a class="nav-link" href="#faq">よくある質問</a></li>
       </ul>
@@ -235,8 +235,7 @@ export function lpPage(o: LpOptions): string {
   <div class="container">
     <div class="section-head reveal">
       <span class="section-label">POLICY</span>
-      <h2 class="section-title">やらない<span class="accent">こと</span></h2>
-      <p class="section-sub">ここが、よくある株式スクリーナーとの違いです。</p>
+      <h2 class="section-title">よくある株式スクリーナーとの<span class="accent">違い</span></h2>
     </div>
     <ul class="nots">
       <li class="not reveal">
@@ -370,7 +369,7 @@ export function lpPage(o: LpOptions): string {
           <ul>
             <li><a href="#about">できること</a></li>
             <li><a href="#features">やっていること</a></li>
-            <li><a href="#nots">やらないこと</a></li>
+            <li><a href="#nots">他社との違い</a></li>
             <li><a href="#status">公開の段階</a></li>
           </ul>
         </div>
