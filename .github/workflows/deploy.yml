@@ -1,0 +1,98 @@
+name: デプロイ
+
+# 本番（Cloudflare Workers）へ出す。
+#
+# **ここが唯一の自動デプロイ経路。** 手元の `npm run deploy` と同じものを
+# 同じ順で走らせる。片方だけ条件を足すとずれるので、
+# 検証の中身は package.json と scripts/preflight.mjs 側に置いてある。
+
+on:
+  push:
+    branches: [claude/stock-screening-ai-library-35qwmk]
+    # ドキュメントだけの変更では Worker の中身が変わらないので出さない。
+    # LP の文面は packages/worker/src/ui/lp.ts にあるので、ここには含めない。
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+# **同時に 2 本走らせない。** 後から来たものを待たせる。
+# cancel-in-progress を true にすると wrangler deploy の途中で
+# 止まることがあり、どの版が出たのか分からなくなる。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      # **秘密情報の確認を先に。** 無いまま wrangler を呼ぶと
+      # 「認証に失敗」としか出ず、どこで登録するのか分からない。
+      - name: Secrets が登録されているか
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -z "$TOKEN" ]   && missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -z "$ACCOUNT" ] && missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::未登録の Secret:$missing"
+            echo "リポジトリの Settings → Secrets and variables → Actions で登録する。"
+            echo "取り方は docs/GO-LIVE.md の B3 の表。"
+            exit 1
+          fi
+
+      # **ci.yml と同じ検証をここでも走らせる。**
+      # 別ワークフローの成否は needs: で参照できない（workflow_run は
+      # 別イベントとして走り、順序が保証されない）。
+      # デプロイの門は、デプロイのジョブ自身が持つ。
+      - name: 型チェック
+        run: npm run typecheck
+      - name: テスト
+        run: npm test
+      - name: サンプルデータがスキーマに投入できるか
+        run: node scripts/verify-seed.mjs
+
+      # preflight → wrangler deploy --env production。
+      # **ここで条件を書き直さない。** workers_dev・database_id・
+      # 運営者情報の確認は scripts/preflight.mjs が持っている。
+      - name: デプロイ
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run deploy -w @invest/worker
+
+      # **宛先は LP ホスト。** routes/lp.ts が LP 側でも /api/health を
+      # 返すので、app ホストに Access を掛けたあともここは通る。
+      # app ホストに向けると、Access を掛けた日からデプロイが落ちる。
+      - name: 生きているか確認
+        run: |
+          url="https://goldencross-incomegains.com/api/health"
+          attempts=3
+          for i in $(seq 1 $attempts); do
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$url" || echo 000)
+            [ "$code" = "200" ] && break
+            if [ "$i" -lt "$attempts" ]; then
+              echo "試行 $i: HTTP $code。5 秒待って再試行"
+              sleep 5
+            else
+              echo "試行 $i: HTTP $code"
+            fi
+          done
+          cat /tmp/health.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::デプロイ後の $url が HTTP $code"
+            echo "デプロイ自体は成功している。ルートか DNS を疑う（docs/DEPLOY.md の「ドメインに反応しない」）。"
+            exit 1
+          fi

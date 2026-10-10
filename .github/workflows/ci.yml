@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    # **デプロイ対象のブランチは除く。** そちらは deploy.yml が
+    # 同じ型チェック・テスト・seed 検証を走らせてからデプロイするので、
+    # ここで走らせると同じものが 2 回動く。
+    branches-ignore: [claude/stock-screening-ai-library-35qwmk]
   pull_request:
 
 jobs:

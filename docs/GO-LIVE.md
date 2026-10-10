@@ -897,6 +897,17 @@ CF_ACCESS_TEAM_DOMAIN = "yourteam.cloudflareaccess.com"
 CF_ACCESS_AUD = "a1b2c3...（64 桁）"
 ```
 
+> **ここに貼るのは手順ではなく前提。** `[env.production.vars]` は
+> デプロイのたびにこのファイルの内容で上書きされる。Cloudflare の
+> ダッシュボードで直接入れても、**次のデプロイで空に戻る**——
+> つまりダッシュボードが無防備な状態に戻る。
+>
+> 自動デプロイ（`.github/workflows/deploy.yml`）が入っているので、
+> これは **push のたびに起きる。** ファイルに貼ること。
+
+反映は 2 通り。**コミットして push すれば Actions が出す**（推奨。
+ファイルに入った状態が本番と一致する）。手元から出すなら:
+
 ```bash
 npm run deploy
 ```

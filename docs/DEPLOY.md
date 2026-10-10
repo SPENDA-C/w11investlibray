@@ -142,6 +142,26 @@ Actions は 1 営業日ぶん（`from` = `to`）を `apply` off で空回しす�
 
 ## 5. デプロイする
 
+**経路は 2 つある。中身は同じ。**
+
+| | いつ走るか |
+|---|---|
+| GitHub Actions（`.github/workflows/deploy.yml`） | `claude/stock-screening-ai-library-35qwmk` に push したとき。Actions タブから手動実行もできる |
+| 手元 | `npm run deploy` |
+
+どちらも `scripts/preflight.mjs` → `wrangler deploy --env production` を
+同じ順で走らせる。**ワークフロー側に条件を書き足さないこと**——
+2 箇所に分かれるとずれる。チェックを足すなら preflight に足す。
+
+> **`docs/` と `*.md` だけの変更では自動デプロイは走らない。**
+> Worker の中身が変わらないため。LP の文面は
+> `packages/worker/src/ui/lp.ts` にあるので、こちらは走る。
+
+> **Actions は型チェック・テスト・seed 検証を通してからデプロイする。**
+> 落ちたら本番には出ない。
+
+手元から出すとき:
+
 ```bash
 npm run deploy          # preflight → wrangler deploy --env production
 ```
@@ -163,6 +183,21 @@ npm run preflight
 
 **必ず `--env production` を付けること。** 付け忘れるとルートの無い
 Worker が上がり、ドメインに反応しない。`npm run deploy` がそれを含んでいる。
+
+### vars は `wrangler.toml` が正。ダッシュボードで入れると消える
+
+`[env.production.vars]`（`CF_ACCESS_TEAM_DOMAIN`・`CF_ACCESS_AUD`・
+`MEMBER_SIGNUP_ENABLED` など）は、**デプロイのたびにファイルの内容で
+上書きされる。** Cloudflare のダッシュボードで直接書き換えても、
+次のデプロイで元に戻る。
+
+**自動デプロイが入ったので、これは push のたびに起きる。**
+Access の値をダッシュボードだけに入れると、次に私がコードを直した瞬間に
+**ダッシュボードが無防備な状態に戻る。** 手順 9 で取った 2 つの値は
+必ず `wrangler.toml` に貼ること。
+
+**Secret（`JQUANTS_API_KEY` など）は別扱いで、デプロイでは消えない。**
+上書きされるのは vars だけ。
 
 ### DNS — A レコードは必要。ただし IP の中身は使われない
 
