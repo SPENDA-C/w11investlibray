@@ -66,6 +66,8 @@ UNIVERSE_LIMIT = "500"
 NEWS_MODEL = "claude-opus-5"
 # **"true" にする前に docs/DATA-SOURCES.md の「再配信の可否」を埋めること。**
 MEMBER_SIGNUP_ENABLED = "false"
+# Google の利用条件を確認するまで "false"（docs/DATA-SOURCES.md の 5）
+QUOTES_PUBLIC_ENABLED = "false"
 # 両方を設定すると、リクエストごとに Access の JWT を検証する。
 # ローカルは空でよい（画面上部に警告が出る）。
 CF_ACCESS_TEAM_DOMAIN = ""
@@ -127,6 +129,8 @@ MARKETS = "JP"
 UNIVERSE_LIMIT = "500"
 NEWS_MODEL = "claude-opus-5"
 MEMBER_SIGNUP_ENABLED = "false"
+# Google の利用条件を確認するまで "false"（docs/DATA-SOURCES.md の 5）
+QUOTES_PUBLIC_ENABLED = "false"
 # **Cloudflare Access のアプリケーションを作ったら埋める。**
 # 空のままだと画面上部に赤い警告が出る（docs/DEPLOY.md 手順 9）。
 CF_ACCESS_TEAM_DOMAIN = ""

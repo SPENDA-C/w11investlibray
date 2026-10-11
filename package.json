@@ -19,7 +19,9 @@
     "preflight": "node scripts/preflight.mjs",
     "set:db-id": "node scripts/set-database-id.mjs",
     "diagnose": "node scripts/diagnose.mjs",
-    "waitlist": "npm run waitlist -w @invest/worker"
+    "waitlist": "npm run waitlist -w @invest/worker",
+    "check:sheet": "npm run check:sheet -w @invest/batch --",
+    "sheet": "npm run sheet -w @invest/batch --"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260825.1",

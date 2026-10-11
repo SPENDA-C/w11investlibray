@@ -9,7 +9,7 @@ export interface LayoutOptions {
   /** Access が未設定のまま本番に出ていないか、画面上で気付けるようにする。 */
   readonly accessWarning?: boolean;
   readonly sampleData?: boolean;
-  readonly activeNav?: 'dashboard' | 'screener' | 'waitlist' | null;
+  readonly activeNav?: 'dashboard' | 'screener' | 'desk' | 'waitlist' | null;
 }
 
 export function layout(o: LayoutOptions): string {
@@ -28,6 +28,7 @@ export function layout(o: LayoutOptions): string {
   <nav>
     <a href="/"${o.activeNav === 'dashboard' ? ' class="on"' : ''}>ダッシュボード</a>
     <a href="/screener"${o.activeNav === 'screener' ? ' class="on"' : ''}>スクリーナー</a>
+    <a href="/desk"${o.activeNav === 'desk' ? ' class="on"' : ''}>デスク</a>
     <a href="/waitlist"${o.activeNav === 'waitlist' ? ' class="on"' : ''}>先行登録</a>
   </nav>
 </header>

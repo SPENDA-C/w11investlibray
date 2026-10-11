@@ -15,7 +15,11 @@
     "prebackfill": "npm run build --silent",
     "backfill": "node .build/cli.mjs backfill",
     "prebacktest": "npm run build --silent",
-    "backtest": "node .build/cli.mjs backtest"
+    "backtest": "node .build/cli.mjs backtest",
+    "precheck:sheet": "npm run build --silent",
+    "check:sheet": "node .build/cli.mjs check-sheet",
+    "presheet": "npm run build --silent",
+    "sheet": "node .build/cli.mjs sheet"
   },
   "dependencies": {
     "@invest/core": "*"

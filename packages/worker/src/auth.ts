@@ -59,6 +59,18 @@ export function isMemberSignupEnabled(env: Env): boolean {
   return env.MEMBER_SIGNUP_ENABLED === 'true';
 }
 
+/**
+ * GOOGLEFINANCE の現在値を、認証なしで見せてよいか。
+ *
+ * **既定は閉じる。** Google の金融データは個人利用を前提とした記述があり、
+ * 会員へ配る形が利用条件に合うか確認できていない
+ * （`docs/DATA-SOURCES.md` の 5）。`MEMBER_SIGNUP_ENABLED` と同じ考え方で、
+ * 確認が済むまで `"false"` のままにする。
+ */
+export function isQuotesPublicEnabled(env: Env): boolean {
+  return env.QUOTES_PUBLIC_ENABLED === 'true';
+}
+
 export async function authenticate(request: Request, env: Env): Promise<AuthResult> {
   if (!isAccessConfigured(env)) {
     // 未設定でも通す。ただし本番でここに落ちていることに気付けるよう、

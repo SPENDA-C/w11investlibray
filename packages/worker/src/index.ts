@@ -1,9 +1,16 @@
 import type { Env } from './types.js';
-import { authenticate, isMemberSignupEnabled, isUnprotectedProduction } from './auth.js';
+import {
+  authenticate,
+  isAccessConfigured,
+  isMemberSignupEnabled,
+  isQuotesPublicEnabled,
+  isUnprotectedProduction,
+} from './auth.js';
 import { resolveSite } from './site.js';
 import { handleLpRequest } from './routes/lp.js';
 import { handleHealth, handleRanking, handleRunPipeline, handleSymbol, json } from './routes/api.js';
 import { handleDashboard, handleScreener, handleSymbolPage } from './routes/ui.js';
+import { handleDesk } from './routes/desk.js';
 import { runDailyPipeline } from './jobs/dailyPipeline.js';
 import { scheduledTargetDate } from './jobs/date.js';
 import { handleWaitlistCsv, handleWaitlistPage } from './routes/waitlistAdmin.js';
@@ -103,6 +110,27 @@ async function route(
   try {
     if (path === '/') return await handleDashboard(env);
     if (path === '/screener') return await handleScreener(env, url);
+
+    // デスク（GOOGLEFINANCE の現在値）。
+    //
+    // **会員に見せる前に、利用条件の確認が要る。** Google の金融データは
+    // 個人利用を前提とした記述があり、会員へ配る形が条件に合うか
+    // 確認できていない（docs/DATA-SOURCES.md の 5）。J-Quants の再配信
+    // （同 2）と同じ扱いで、確認が済むまでフラグで閉じておく。
+    //
+    // **Access の内側では開く。** 自分で見るぶんには論点が立たない。
+    if (path === '/desk') {
+      if (!isQuotesPublicEnabled(env) && !isAccessConfigured(env)) {
+        return json(
+          {
+            error: '現在値の公開は停止中',
+            hint: 'docs/DATA-SOURCES.md の 5。Access を設定するか、確認が済んだら QUOTES_PUBLIC_ENABLED を true にする',
+          },
+          503,
+        );
+      }
+      return await handleDesk(env);
+    }
 
     const symbolPageMatch = /^\/symbol\/(.+)$/.exec(path);
     if (symbolPageMatch?.[1] !== undefined) {

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, keyHint, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
+import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, keyHint, parseRows, parseSheetTimestamp, isStale, assembleSheetSync, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
 
 test('引数の解析 — 値ありとフラグのみを区別する', () => {
   const a = parseArgs(['backfill', '--from', '2026-01-01', '--to', '2026-02-01', '--verbose']);
@@ -271,6 +271,141 @@ test('keyHint — キーが効いていない 403 は、置き場所 3 つを全
 
 test('keyHint — 401 もキー扱い', () => {
   assert.match(keyHint(401, {}), /Actions/);
+});
+
+// ---- シート取り込み ----------------------------------------------------------
+//
+// GOOGLEFINANCE は API を持たない表計算の数式なので、**シートが取得層になる。**
+// 取れない銘柄は C 列が `#N/A` になる。そこを「0」や「欠測」として
+// 通してしまうと、**取れていないことが画面から消える。** 必ず弾く。
+
+const HEADER = ['symbol_id', 'gf_ticker', 'price', 'as_of'];
+
+test('parseRows — 取れなかった行を良い行として通さない', () => {
+  const { ok, bad } = parseRows([
+    HEADER,
+    ['US.NVDA', 'NASDAQ:NVDA', '188.42', '2026-10-11 12:34:56'],
+    ['CRYPTO.BTCUSD', 'CURRENCY:BTCUSD', '#N/A', ''],
+    ['US.SLV', 'NYSEARCA:SLV', '#ERROR!', ''],
+  ]);
+  assert.deepEqual(ok.map((r) => r.symbolId), ['US.NVDA']);
+  assert.deepEqual(bad.map((r) => r.raw), ['#N/A', '#ERROR!']);
+  // どの行かが分かること（シートを直すのは人間なので行番号が要る）
+  assert.deepEqual(bad.map((r) => r.line), [3, 4]);
+});
+
+test('parseRows — 空の行は飛ばす。不良として数えない', () => {
+  const { ok, bad } = parseRows([HEADER, ['', '', '', ''], ['   ', '', '', '']]);
+  assert.equal(ok.length, 0);
+  assert.equal(bad.length, 0);
+});
+
+test('parseRows — symbol_id の形を検査する', () => {
+  const { ok, bad } = parseRows([
+    HEADER,
+    ['NVDA', 'NASDAQ:NVDA', '188.42', ''],          // 名前空間が無い
+    ['XX.NVDA', 'NASDAQ:NVDA', '188.42', ''],       // 知らない市場
+    ['US.NVDA', '', '188.42', ''],                  // ティッカーが無い
+  ]);
+  assert.equal(ok.length, 0);
+  assert.equal(bad.length, 3);
+});
+
+test('parseRows — 通貨は symbol_id から決まる。E 列があれば優先する', () => {
+  const { ok } = parseRows([
+    [...HEADER, 'currency'],
+    ['US.NVDA', 'NASDAQ:NVDA', '188.42', ''],
+    ['JP.72030', 'TYO:7203', '2890', ''],
+    ['FX.USDJPY', 'CURRENCY:USDJPY', '152.31', ''],
+    ['CRYPTO.BTCUSD', 'CURRENCY:BTCUSD', '95000', ''],
+    ['FX.EURJPY', 'CURRENCY:EURJPY', '165.2', '', 'JPY'],
+  ]);
+  assert.deepEqual(ok.map((r) => r.currency), ['USD', 'JPY', 'JPY', 'USD', 'JPY']);
+});
+
+test('parseRows — 桁区切りや通貨記号が付いていても数値として読む', () => {
+  const { ok, bad } = parseRows([
+    HEADER,
+    ['CRYPTO.BTCUSD', 'CURRENCY:BTCUSD', '$95,432.10', ''],
+  ]);
+  assert.equal(bad.length, 0);
+  assert.equal(ok[0].price, 95432.1);
+});
+
+// **=NOW() の読み方がいちばんずれやすい。**
+// Sheets API は既定で表示文字列を返すので、書式とタイムゾーン次第で
+// 見た目が変わる。シリアル値で返ってきたのを黙って受けると、
+// 1899 年起点の日数を日付として解釈して何年もずれる。
+
+test('parseSheetTimestamp — 文字列を指定したオフセットで解釈する', () => {
+  assert.equal(parseSheetTimestamp('2026-10-11 12:34:56', '+09:00'), '2026-10-11T03:34:56.000Z');
+  assert.equal(parseSheetTimestamp('2026-10-11T12:34:56', '+00:00'), '2026-10-11T12:34:56.000Z');
+});
+
+test('parseSheetTimestamp — シリアル値は黙って受けない', () => {
+  // =NOW() のまま（TEXT で包み忘れ）だとこうなる。
+  assert.throws(() => parseSheetTimestamp('46321.5243', '+09:00'), /TEXT/);
+});
+
+test('parseSheetTimestamp — 空と読めない文字列は落とす', () => {
+  assert.throws(() => parseSheetTimestamp('', '+09:00'), /空/);
+  assert.throws(() => parseSheetTimestamp('きのう', '+09:00'), /きのう/);
+});
+
+test('isStale — 境界', () => {
+  const now = '2026-10-11T12:00:00.000Z';
+  assert.equal(isStale('2026-10-11T11:00:00.000Z', now, 24), false);
+  assert.equal(isStale('2026-10-10T12:00:01.000Z', now, 24), false);
+  assert.equal(isStale('2026-10-10T11:59:59.000Z', now, 24), true);
+});
+
+test('assembleSheetSync — symbols が quotes_snapshot より先に来る', () => {
+  const { ok } = parseRows([HEADER, ['US.NVDA', 'NASDAQ:NVDA', '188.42', '']]);
+  const sql = assembleSheetSync({
+    rows: ok,
+    asOf: '2026-10-11T03:34:56.000Z',
+    fetchedAt: '2026-10-11T03:40:00.000Z',
+  }).join('\n');
+  const symbols = sql.indexOf('INSERT INTO symbols');
+  const quotes = sql.indexOf('INSERT INTO quotes_snapshot');
+  assert.ok(symbols >= 0 && quotes >= 0, '両方の INSERT があること');
+  // 外部キーがあるので、逆だと FOREIGN KEY constraint failed で落ちる
+  assert.ok(symbols < quotes, `symbols が先に来ていない: ${symbols} / ${quotes}`);
+});
+
+test('assembleSheetSync — 生成した SQL が実スキーマにそのまま通る', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { ok } = parseRows([
+    HEADER,
+    ['US.NVDA', 'NASDAQ:NVDA', '188.42', ''],
+    ['FX.USDJPY', 'CURRENCY:USDJPY', '152.31', ''],
+  ]);
+  const sql = assembleSheetSync({
+    rows: ok,
+    asOf: '2026-10-11T03:34:56.000Z',
+    fetchedAt: '2026-10-11T03:40:00.000Z',
+  }).join('\n');
+
+  const db = new DatabaseSync(':memory:');
+  // **外部キーを有効にして確かめる。** quotes_snapshot は symbols を参照して
+  // いるので、順序を間違えるとここで落ちる。切ったままだと素通りしてしまう。
+  db.exec('PRAGMA foreign_keys = ON;');
+  db.exec(await readFile(new URL('../../../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  db.exec(await readFile(new URL('../../../migrations/0003_quotes.sql', import.meta.url), 'utf8'));
+  // **symbols を手で入れない。** 生成物だけで通ることを見る。
+  db.exec(sql);
+
+  // node:sqlite の行は null プロトタイプなので、deepEqual ではなく値で比べる。
+  const rows = db
+    .prepare('SELECT symbol_id, price, currency FROM quotes_snapshot ORDER BY symbol_id')
+    .all()
+    .map((r) => `${r.symbol_id} ${r.price} ${r.currency}`);
+  assert.deepEqual(rows, ['FX.USDJPY 152.31 JPY', 'US.NVDA 188.42 USD']);
+
+  // symbols 側も生成物だけで埋まっていること（名前はコードで代用する）。
+  const sym = db.prepare("SELECT market, name FROM symbols WHERE symbol_id = 'FX.USDJPY'").get();
+  assert.equal(sym.market, 'FX');
+  assert.equal(sym.name, 'USDJPY');
 });
 
 // ---- backfill の分割 ---------------------------------------------------------

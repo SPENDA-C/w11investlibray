@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { runCheck } from './commands/check.js';
 import { runBackfill } from './commands/backfill.js';
 import { runBacktestCommand } from './commands/backtest.js';
+import { runCheckSheet, runSheetSync, DEFAULT_RANGE } from './commands/sheet.js';
 import { DEFAULT_BASE_URL } from './jquants.js';
 
 // テストから使う口。CLI 本体の引数解析やルール解決を、実行せずに確かめられるようにする。
@@ -9,6 +10,17 @@ export { resolveRule, runBacktestCommand } from './commands/backtest.js';
 export { insertStatements, q } from './sql.js';
 export { runCheck, reasonFrom } from './commands/check.js';
 export { Jquants, keyHint, JP_PATHS } from './jquants.js';
+export { parseServiceAccount, signJwt, sheetHint } from './sheets.js';
+export {
+  parseRows,
+  parseSheetTimestamp,
+  isStale,
+  currencyFor,
+  symbolStatements,
+  quoteStatements,
+  assembleSheetSync,
+  DEFAULT_RANGE,
+} from './commands/sheet.js';
 export {
   splitByBytes,
   chunkPath,
@@ -37,6 +49,18 @@ const USAGE = `使い方
     --max-bytes n                    1 ファイルの上限。既定 5242880（5 MB）
     --delay ms                       リクエスト間隔。既定 200
 
+  check-sheet                        シートが実際に何を返すかを表示する
+    --sheet  id                      既定は環境変数 QUOTES_SHEET_ID
+    --range  A1:E                    既定 ${DEFAULT_RANGE}
+    --tz-offset +09:00               D 列の =TEXT(NOW(),…) を解釈するオフセット
+
+  sheet                              シートの現在値を D1 用の .sql に書き出す
+    --sheet  id                      既定は環境変数 QUOTES_SHEET_ID
+    --range  A1:E                    既定 ${DEFAULT_RANGE}
+    --tz-offset +09:00               既定 +09:00
+    --max-age-hours 24               これより古い as_of なら取り込まず落とす
+    --out  path                      既定 out/quotes.sql
+
   backtest                           ルールを過去データで検証する
     --input path   (必須)            {"JP.72030":[{date,open,high,low,close,volume,adjustmentFactor}]}
     --rule  name                     golden-cross | score-NN。既定 golden-cross
@@ -48,6 +72,8 @@ const USAGE = `使い方
 環境変数
   JQUANTS_API_KEY    J-Quants の API キー（check / backfill で必須）
   JQUANTS_BASE_URL   既定 ${DEFAULT_BASE_URL}
+  GOOGLE_SERVICE_ACCOUNT_JSON  サービスアカウント鍵の JSON（check-sheet / sheet で必須）
+  QUOTES_SHEET_ID              読むシートの ID（--sheet で上書きできる）
 `;
 
 export function parseArgs(argv: readonly string[]): { command: string; flags: Record<string, string> } {
@@ -115,6 +141,35 @@ async function main(): Promise<number> {
         ...(flags['max-bytes'] === undefined ? {} : { maxBytes: Number(flags['max-bytes']) }),
         delayMs: Number(flags['delay'] ?? '200'),
       });
+    }
+    case 'check-sheet':
+    case 'sheet': {
+      // **引数の検証を鍵より先に。** backfill と同じ理由——引数の間違いは
+      // コマンドラインを見れば直せるが、鍵は探しに行く必要がある。
+      const sheetId = flags['sheet'] ?? process.env['QUOTES_SHEET_ID'] ?? '';
+      if (sheetId === '') {
+        console.error('--sheet か環境変数 QUOTES_SHEET_ID が必要。');
+        console.error('  シートの URL の /d/ と /edit の間がシート ID。');
+        return 1;
+      }
+      const serviceAccountJson = process.env['GOOGLE_SERVICE_ACCOUNT_JSON'] ?? '';
+      if (serviceAccountJson === '') {
+        console.error('GOOGLE_SERVICE_ACCOUNT_JSON が未設定。');
+        return 1;
+      }
+      const common = {
+        serviceAccountJson,
+        sheetId,
+        range: flags['range'] ?? DEFAULT_RANGE,
+        tzOffset: flags['tz-offset'] ?? '+09:00',
+      };
+      return command === 'check-sheet'
+        ? runCheckSheet(common)
+        : runSheetSync({
+            ...common,
+            out: flags['out'] ?? 'out/quotes.sql',
+            maxAgeHours: Number(flags['max-age-hours'] ?? '24'),
+          });
     }
     case 'backtest': {
       const input = flags['input'];

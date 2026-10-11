@@ -124,10 +124,16 @@ export const SCHEMA_PATH = fileURLToPath(
 export const WAITLIST_SCHEMA_PATH = fileURLToPath(
   new URL('../../../../migrations/0002_waitlist.sql', import.meta.url),
 );
+export const QUOTES_SCHEMA_PATH = fileURLToPath(
+  new URL('../../../../migrations/0003_quotes.sql', import.meta.url),
+);
 
 export function makeEnv(overrides = {}) {
   return {
-    INVEST_DB: new FakeD1(SCHEMA_PATH, WAITLIST_SCHEMA_PATH),
+    // **マイグレーションを足したらここにも足す。** 足し忘れると、
+    // 新しいテーブルを使う画面がテストでは「無い」ことになり、
+    // 本番で初めて落ちる。
+    INVEST_DB: new FakeD1(SCHEMA_PATH, WAITLIST_SCHEMA_PATH, QUOTES_SCHEMA_PATH),
     INVEST_R2: new FakeR2(),
     SITE_NAME: 'ゴールデンクロスーインカムゲインを究める資産運用',
     SITE_SHORT_NAME: 'ゴールデンクロス',
@@ -137,6 +143,7 @@ export function makeEnv(overrides = {}) {
     UNIVERSE_LIMIT: '500',
     NEWS_MODEL: 'test-model',
     MEMBER_SIGNUP_ENABLED: 'false',
+    QUOTES_PUBLIC_ENABLED: 'false',
     CF_ACCESS_TEAM_DOMAIN: '',
     CF_ACCESS_AUD: '',
     JQUANTS_BASE_URL: 'https://api.example.test/v2',

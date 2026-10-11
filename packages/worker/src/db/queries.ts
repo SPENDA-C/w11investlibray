@@ -590,6 +590,40 @@ export async function selectWaitlist(db: D1Database, limit: number): Promise<Wai
   }));
 }
 
+export interface QuoteRow {
+  readonly symbol_id: string;
+  readonly market: string;
+  readonly code: string;
+  readonly name: string;
+  readonly price: number;
+  readonly currency: string;
+  readonly as_of: string;
+}
+
+/**
+ * 銘柄ごとの最新のスナップショット。
+ *
+ * **1 銘柄 1 行に畳む。** `quotes_snapshot` は取り込むたびに行が増えるので、
+ * 畳まないと同じ銘柄が何度も並ぶ。`MAX(as_of)` で選んだ行だけを返す。
+ *
+ * `prices_daily` には触れない。あちらは J-Quants の公式データで、
+ * 混ぜない方針（migrations/0003_quotes.sql）。
+ */
+export async function latestQuotes(db: D1Database): Promise<QuoteRow[]> {
+  const res = await db
+    .prepare(
+      `SELECT q.symbol_id, s.market, s.code, s.name, q.price, q.currency, q.as_of
+         FROM quotes_snapshot q
+         JOIN symbols s ON s.symbol_id = q.symbol_id
+         JOIN (SELECT symbol_id, MAX(as_of) AS as_of
+                 FROM quotes_snapshot GROUP BY symbol_id) m
+           ON m.symbol_id = q.symbol_id AND m.as_of = q.as_of
+        ORDER BY s.market, s.code`,
+    )
+    .all<QuoteRow>();
+  return res.results ?? [];
+}
+
 /** 状態ごとの件数。画面の見出しに出す。 */
 export async function countWaitlist(db: D1Database): Promise<Record<string, number>> {
   const res = await db

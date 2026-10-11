@@ -121,6 +121,17 @@ npx wrangler secret list --env production      # 入ったか確認
 | Cloudflare Worker の secret | **毎日 6:15 の Cron** | `npx wrangler secret put JQUANTS_API_KEY --env production` | **静かに失敗し続ける** |
 | GitHub Actions の secret | バックフィルのワークフロー | Settings → Secrets and variables → Actions | ワークフローが 403 で落ちる |
 
+**Google のサービスアカウント鍵も同じ性質を持つ。** 置き場所は 2 つ:
+
+| | 誰が読むか | 更新の方法 |
+|---|---|---|
+| 手元の `GOOGLE_SERVICE_ACCOUNT_JSON` | `npm run check:sheet` | シェルで export し直す |
+| GitHub Actions の `GOOGLE_SERVICE_ACCOUNT_JSON` | 現在値の取り込み | Settings → Secrets and variables → Actions |
+
+鍵を作り直したら**両方**入れ替える。あわせて、**シートをサービスアカウントの
+`client_email` に閲覧者として共有してあるか**も確認すること。鍵が正しくても
+共有が外れていれば 403 になる（取り込み側がその旨を出し分ける）。
+
 **危ないのは 2 つめ。** Actions は即落ちるので気付くが、Worker の secret が
 古いと **Cron が毎朝失敗するだけで、誰も見ていなければ気付かない。**
 画面が古くなって初めて分かる。**キーを回したら必ず 3 つとも入れ直すこと。**

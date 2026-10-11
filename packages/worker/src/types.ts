@@ -15,6 +15,8 @@ export interface Env {
   UNIVERSE_LIMIT: string;
   NEWS_MODEL: string;
   MEMBER_SIGNUP_ENABLED: string;
+  /** GOOGLEFINANCE の現在値を認証なしで見せるか。既定 "false"。 */
+  QUOTES_PUBLIC_ENABLED: string;
   CF_ACCESS_TEAM_DOMAIN: string;
   CF_ACCESS_AUD: string;
   JQUANTS_BASE_URL: string;
