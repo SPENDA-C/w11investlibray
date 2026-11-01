@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, keyHint, parseParams, parseRows, parseSheetTimestamp, isStale, assembleSheetSync, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
+import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, keyHint, parseParams, Finnhub, finnhubHint, rowsOf, parseRows, parseSheetTimestamp, isStale, assembleSheetSync, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
 
 test('引数の解析 — 値ありとフラグのみを区別する', () => {
   const a = parseArgs(['backfill', '--from', '2026-01-01', '--to', '2026-02-01', '--verbose']);
@@ -407,6 +407,54 @@ test('check — 200 でも 0 件なら、そう言う', async () => {
     [{ path: '/fins/announcement', params: {} }],
   );
   assert.match(out, /0 件/);
+});
+
+// ---- Finnhub -----------------------------------------------------------------
+
+test('rowsOf — 配列でも、包まれていても取り出す', () => {
+  // **Finnhub が何を返すか確かめていない。** 素の配列かもしれないし
+  // {earningsCalendar: [...]} かもしれない。どちらでも拾えるようにして、
+  // 実物を見てから形を確定させる。
+  assert.equal(rowsOf([{ a: 1 }]).length, 1);
+  assert.equal(rowsOf({ earningsCalendar: [{ a: 1 }, { b: 2 }] }).length, 2);
+  assert.equal(rowsOf({ data: [{ a: 1 }] }).length, 1);
+  assert.deepEqual(rowsOf({}), []);
+  assert.deepEqual(rowsOf(null), []);
+  assert.deepEqual(rowsOf('エラーの文字列'), []);
+});
+
+test('Finnhub — キーに使えない文字が入っていたら、作る前に落とす', () => {
+  // J-Quants で踏んだ ByteString の件と同じガード。
+  assert.throws(() => new Finnhub('（全角）'), /使えない文字/);
+  assert.throws(() => new Finnhub('abc def'), /使えない文字/);
+  assert.throws(() => new Finnhub(''), /未設定/);
+});
+
+test('Finnhub — キーはヘッダで渡す（URL に載せない）', async () => {
+  // クエリに載せるとアクセスログやリファラに残りうる。
+  let seen = null;
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    seen = { url: String(url), headers: init?.headers ?? {} };
+    return new Response('[]', { status: 200 });
+  };
+  try {
+    await new Finnhub('secret-key-value').probe('/calendar/earnings', { from: '2026-11-01' });
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.ok(!seen.url.includes('secret-key-value'), 'キーが URL に入っている');
+  assert.equal(seen.headers['X-Finnhub-Token'], 'secret-key-value');
+  assert.match(seen.url, /from=2026-11-01/);
+});
+
+test('finnhubHint — 状態コードごとに次の一手を出す', () => {
+  assert.match(finnhubHint(401, {}), /FINNHUB_API_KEY/);
+  assert.match(finnhubHint(429, {}), /回数制限/);
+  assert.match(finnhubHint(404, {}), /経路/);
+  assert.equal(finnhubHint(200, { ok: true }), '');
+  // キーの置き場所は 2 箇所（手元と Actions）。Cloudflare は関係ない。
+  assert.doesNotMatch(finnhubHint(401, {}), /Cloudflare/);
 });
 
 // ---- シート取り込み ----------------------------------------------------------

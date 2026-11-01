@@ -19,7 +19,9 @@
     "precheck:sheet": "npm run build --silent",
     "check:sheet": "node .build/cli.mjs check-sheet",
     "presheet": "npm run build --silent",
-    "sheet": "node .build/cli.mjs sheet"
+    "sheet": "node .build/cli.mjs sheet",
+    "precheck:finnhub": "npm run build --silent",
+    "check:finnhub": "node .build/cli.mjs check-finnhub"
   },
   "dependencies": {
     "@invest/core": "*"

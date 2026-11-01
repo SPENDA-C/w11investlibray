@@ -3,6 +3,7 @@ import { runCheck, parseParams } from './commands/check.js';
 import { runBackfill } from './commands/backfill.js';
 import { runBacktestCommand } from './commands/backtest.js';
 import { runCheckSheet, runSheetSync, DEFAULT_RANGE } from './commands/sheet.js';
+import { runCheckFinnhub } from './commands/checkFinnhub.js';
 import { DEFAULT_BASE_URL } from './jquants.js';
 
 // テストから使う口。CLI 本体の引数解析やルール解決を、実行せずに確かめられるようにする。
@@ -11,6 +12,8 @@ export { insertStatements, q } from './sql.js';
 export { runCheck, reasonFrom, parseParams } from './commands/check.js';
 export { Jquants, keyHint, JP_PATHS } from './jquants.js';
 export { parseServiceAccount, signJwt, sheetHint } from './sheets.js';
+export { Finnhub, finnhubHint, CANDIDATE_EARNINGS_PATH } from './finnhub.js';
+export { rowsOf } from './commands/checkFinnhub.js';
 export {
   parseRows,
   parseSheetTimestamp,
@@ -63,6 +66,12 @@ const USAGE = `使い方
     --max-age-hours 24               これより古い as_of なら取り込まず落とす
     --out  path                      既定 out/quotes.sql
 
+  check-finnhub                      Finnhub が実際に何を返すかを表示する
+    --from YYYY-MM-DD                既定は今日
+    --to   YYYY-MM-DD                既定は 30 日後
+    --path /a,/b                     経路の候補（既定 /calendar/earnings）
+    --jp-symbol 7203.T               日本株が取れるか試す銘柄
+
   backtest                           ルールを過去データで検証する
     --input path   (必須)            {"JP.72030":[{date,open,high,low,close,volume,adjustmentFactor}]}
     --rule  name                     golden-cross | score-NN。既定 golden-cross
@@ -75,6 +84,7 @@ const USAGE = `使い方
   JQUANTS_API_KEY    J-Quants の API キー（check / backfill で必須）
   JQUANTS_BASE_URL   既定 ${DEFAULT_BASE_URL}
   GOOGLE_SERVICE_ACCOUNT_JSON  サービスアカウント鍵の JSON（check-sheet / sheet で必須）
+  FINNHUB_API_KEY              Finnhub の API キー（check-finnhub で必須）
   QUOTES_SHEET_ID              読むシートの ID（--sheet で上書きできる）
 `;
 
@@ -182,6 +192,25 @@ async function main(): Promise<number> {
             out: flags['out'] ?? 'out/quotes.sql',
             maxAgeHours: Number(flags['max-age-hours'] ?? '24'),
           });
+    }
+    case 'check-finnhub': {
+      const apiKey = process.env['FINNHUB_API_KEY'] ?? '';
+      if (!apiKey) {
+        console.error('FINNHUB_API_KEY が未設定。');
+        console.error('  finnhub.io のダッシュボードで取得する。');
+        return 1;
+      }
+      const today = new Date();
+      const plus = new Date(today.getTime() + 30 * 86400000);
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      return runCheckFinnhub({
+        apiKey,
+        baseUrl: process.env['FINNHUB_BASE_URL'] ?? 'https://finnhub.io/api/v1',
+        from: flags['from'] ?? iso(today),
+        to: flags['to'] ?? iso(plus),
+        paths: (flags['path'] ?? '').split(',').map((p) => p.trim()).filter((p) => p !== ''),
+        jpSymbol: flags['jp-symbol'] ?? '7203.T',
+      });
     }
     case 'backtest': {
       const input = flags['input'];
