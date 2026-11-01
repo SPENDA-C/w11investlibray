@@ -881,16 +881,32 @@ Save する。
 
 | 変数 | どこにあるか | 形（照合の基準） |
 |---|---|---|
-| `CF_ACCESS_AUD` | Access → Applications → `invest-dashboard` を開く → Overview の **Application Audience (AUD) Tag** | **64 桁の 16 進数** |
+| `CF_ACCESS_AUD` | Access → Applications → `invest-dashboard` の行をクリック → **Overview** タブ → **Application Audience (AUD) Tag**（コピー用のアイコンが付いている） | **64 桁の 16 進数** |
 | `CF_ACCESS_TEAM_DOMAIN` | Zero Trust → Settings → General の **Team domain** | **`.cloudflareaccess.com` で終わる** |
 
 > コンソールの文言や階層は変わることがある。迷ったら**値の形**で見分ける。
 > 64 桁の 16 進数が AUD、`.cloudflareaccess.com` で終わるのが Team domain。
 
-### 貼る場所
+### 貼る場所 — **探さなくてよい**
 
-`packages/worker/wrangler.toml` の **`[env.production.vars]`**（126〜127 行目付近）。
-**既定側ではなく本番側**に入れること。
+```bash
+npm run set:access -- <Team domain> <AUD>
+```
+
+順番は問わない。**値の形で見分ける**ので、画面からまるごと貼ってもよい。
+片方だけ先に渡すこともできる。
+
+```bash
+npm run set:access -- weathered-frost-70c2.cloudflareaccess.com
+npm run set:access -- a1b2c3…（64桁）
+```
+
+> **本番側だけに書く。** 既定（`[vars]`）に値が入ると、手元の
+> `wrangler dev` で Access の JWT 検証が始まり、何も開けなくなる。
+> スクリプトは `[env.production.vars]` の中だけを書き換える。
+
+手で貼るなら `packages/worker/wrangler.toml` の **`[env.production.vars]`**
+（**既定側ではなく本番側**）:
 
 ```toml
 CF_ACCESS_TEAM_DOMAIN = "yourteam.cloudflareaccess.com"

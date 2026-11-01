@@ -260,6 +260,51 @@ test('diagnose の URL を wrangler.toml から組み立てる', async () => {
   assert.equal(readProdVar(config, 'NO_SUCH_KEY'), '');
 });
 
+test('set:access — 値の形で見分け、本番側だけに書く', async () => {
+  // **「[env.production.vars] がどこか分からない」で止まった。**
+  // database_id のときと同じ形で、貼り先を探す作業を無くす。
+  const { extractAccess, applyToProdVars } = await import('../../../scripts/set-access.mjs');
+
+  const aud = 'a'.repeat(64);
+  // 順番を問わない。画面からまるごと貼っても拾う。
+  assert.deepEqual(extractAccess(`team-x.cloudflareaccess.com ${aud}`), {
+    aud,
+    teamDomain: 'team-x.cloudflareaccess.com',
+  });
+  assert.deepEqual(extractAccess(`${aud} が AUD で、team-x.cloudflareaccess.com がチーム`), {
+    aud,
+    teamDomain: 'team-x.cloudflareaccess.com',
+  });
+  // 片方だけでもよい
+  assert.deepEqual(extractAccess('weathered-frost-70c2.cloudflareaccess.com'), {
+    aud: null,
+    teamDomain: 'weathered-frost-70c2.cloudflareaccess.com',
+  });
+  // **32 桁は AUD ではない。** 拾ってしまうと間違った値で Access が通らなくなる。
+  assert.equal(extractAccess('b'.repeat(32)).aud, null);
+  assert.deepEqual(extractAccess('なにもない'), { aud: null, teamDomain: null });
+
+  // **既定側を書き換えない。** 既定に値が入ると手元の wrangler dev で
+  // JWT 検証が始まり、何も開けなくなる。
+  const config = [
+    '[vars]',
+    'CF_ACCESS_AUD = ""',
+    '',
+    '[env.production.vars]',
+    'CF_ACCESS_AUD = ""',
+    '',
+    '[env.production.routes]',
+  ].join('\n');
+  const res = applyToProdVars(config, 'CF_ACCESS_AUD', aud);
+  assert.ok(res.ok);
+  const lines = res.config.split('\n');
+  assert.equal(lines[1], 'CF_ACCESS_AUD = ""', '既定側まで書き換えている');
+  assert.equal(lines[4], `CF_ACCESS_AUD = "${aud}"`);
+
+  // セクションが無ければ黙って成功しない
+  assert.equal(applyToProdVars('[vars]\nX = ""', 'CF_ACCESS_AUD', aud).ok, false);
+});
+
 test('diagnose が「手元が古い」ことを数えられる', async () => {
   // **pull を忘れたまま打って 4 回止まった。** Missing script や
   // 「フラグが効かない」として現れるので、原因に辿り着きにくい。
