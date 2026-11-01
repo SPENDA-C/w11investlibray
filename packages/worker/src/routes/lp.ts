@@ -1,7 +1,7 @@
 import type { Env } from '../types.js';
 import { lpPage } from '../ui/lp.js';
 import { parseMonth, formatMonth, calendarSection, type EarningsEntry } from '../ui/calendar.js';
-import { earningsForMonth } from '../db/queries.js';
+import { earningsForMonth, hasEarnings } from '../db/queries.js';
 import { appUrl, lpBasePath, lpUrl } from '../site.js';
 import { handleWaitlist } from './waitlist.js';
 import { handleHealth } from './api.js';
@@ -18,6 +18,12 @@ export interface CalendarData {
   readonly year: number;
   readonly month: number;
   readonly entries: EarningsEntry[];
+  /**
+   * その市場の予定が 1 件でもあるか。
+   * **公開 LP に空のカレンダーを出さないための判定。**
+   * 当月が空なだけなら枠は出す（翌月に送れないと困る）。
+   */
+  readonly any: boolean;
 }
 
 /**
@@ -36,10 +42,14 @@ export async function earningsCalendars(
   const pick = async (anchor: string, market: string): Promise<CalendarData> => {
     const asked = parseMonth(url.searchParams.get(anchor) ?? '');
     const { year, month } = asked ?? current;
-    const rows = await earningsForMonth(env.INVEST_DB, market, formatMonth(year, month));
+    const [rows, any] = await Promise.all([
+      earningsForMonth(env.INVEST_DB, market, formatMonth(year, month)),
+      hasEarnings(env.INVEST_DB, market),
+    ]);
     return {
       year,
       month,
+      any,
       entries: rows.map((r) => ({
         symbolId: r.symbol_id,
         code: r.code,
@@ -61,21 +71,15 @@ export function renderCalendars(
   data: { jp: CalendarData; us: CalendarData },
   basePath: string,
 ): { jp: string; us: string } {
+  // **1 件も無い市場は、枠ごと出さない。** 公開ページに空の升目を
+  // 並べても何も伝わらない。取り込みが始まれば自動的に現れる。
+  const one = (d: CalendarData, title: string, anchor: string) =>
+    d.any
+      ? calendarSection({ title, ...d, basePath, anchor, emptyNote: EMPTY_NOTE })
+      : '';
   return {
-    jp: calendarSection({
-      title: '日本株 決算発表カレンダー',
-      ...data.jp,
-      basePath,
-      anchor: 'cal-jp',
-      emptyNote: EMPTY_NOTE,
-    }),
-    us: calendarSection({
-      title: '米国株（Nasdaq）決算発表カレンダー',
-      ...data.us,
-      basePath,
-      anchor: 'cal-us',
-      emptyNote: EMPTY_NOTE,
-    }),
+    jp: one(data.jp, '日本株 決算発表カレンダー', 'cal-jp'),
+    us: one(data.us, '米国株（Nasdaq）決算発表カレンダー', 'cal-us'),
   };
 }
 

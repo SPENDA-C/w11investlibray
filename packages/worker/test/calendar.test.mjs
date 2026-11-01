@@ -136,11 +136,43 @@ test('calendarSection — 銘柄名を HTML エスケープする', () => {
 
 // ---- LP に出ること -----------------------------------------------------------
 
-test('LP のトップに 2 つのカレンダーが出る', async () => {
+/** symbols と earnings_calendar に 1 件入れる。 */
+async function seed(env, symbolId, market, code, name, date) {
+  await env.INVEST_DB.prepare(
+    `INSERT INTO symbols (symbol_id, market, code, name, currency, updated_at)
+     VALUES (?1, ?2, ?3, ?4, 'JPY', '2026-11-01')`,
+  ).bind(symbolId, market, code, name).run();
+  await env.INVEST_DB.prepare(
+    `INSERT INTO earnings_calendar (symbol_id, announce_date, session, source, confirmed, fetched_at)
+     VALUES (?1, ?2, NULL, 'jquants', 1, '2026-11-01')`,
+  ).bind(symbolId, date).run();
+}
+
+test('データが 1 件も無い市場は、枠ごと出さない', async () => {
+  // **公開 LP に空の升目を並べない。** 訪問者には作りかけに見えるだけで、
+  // 何も伝わらない。取り込みが始まれば自動的に現れる。
   const env = makeEnv(HOSTS);
   const html = await (await handler.fetch(req('https://invest.example/'), env, ctx)).text();
-  assert.match(html, /id="cal-jp"/, '日本株のカレンダーが無い');
-  assert.match(html, /id="cal-us"/, '米国株のカレンダーが無い');
+  assert.ok(!html.includes('id="cal-jp"'), 'データが無いのにカレンダーが出ている');
+  assert.ok(!html.includes('id="cal-us"'), 'データが無いのにカレンダーが出ている');
+});
+
+test('データがある市場だけカレンダーが出る', async () => {
+  const env = makeEnv(HOSTS);
+  await seed(env, 'JP.72030', 'JP', '7203', 'トヨタ自動車', '2026-11-05');
+  const html = await (await handler.fetch(req('https://invest.example/'), env, ctx)).text();
+  assert.match(html, /id="cal-jp"/, '日本株のカレンダーが出ていない');
+  assert.ok(!html.includes('id="cal-us"'), '米国株は空なのに出ている');
+});
+
+test('当月が空でも、データがあれば枠は残す（翌月に送れるように）', async () => {
+  const env = makeEnv(HOSTS);
+  await seed(env, 'JP.72030', 'JP', '7203', 'トヨタ自動車', '2026-12-05');
+  const html = await (
+    await handler.fetch(req('https://invest.example/?cal-jp=2026-11'), env, ctx)
+  ).text();
+  assert.match(html, /id="cal-jp"/, '当月が空なだけで枠ごと消えている');
+  assert.match(html, /2026年12月/, '翌月への導線が無い');
 });
 
 test('月の指定が壊れていても落ちない', async () => {

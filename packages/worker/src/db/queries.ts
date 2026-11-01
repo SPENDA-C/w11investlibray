@@ -663,6 +663,24 @@ export async function earningsForMonth(
   return res.results ?? [];
 }
 
+/**
+ * その市場の発表予定が 1 件でもあるか。
+ *
+ * **公開 LP に空のカレンダーを出さないための判定。** 当月が空なだけなら
+ * 枠は出す（翌月に送れないと困る）。1 件も無いときだけ丸ごと隠す。
+ */
+export async function hasEarnings(db: D1Database, market: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS n FROM earnings_calendar e
+         JOIN symbols s ON s.symbol_id = e.symbol_id
+        WHERE s.market = ?1 LIMIT 1`,
+    )
+    .bind(market)
+    .first<{ n: number }>();
+  return row !== null;
+}
+
 /** 状態ごとの件数。画面の見出しに出す。 */
 export async function countWaitlist(db: D1Database): Promise<Record<string, number>> {
   const res = await db
