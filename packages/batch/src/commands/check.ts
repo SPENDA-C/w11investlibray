@@ -1,5 +1,7 @@
 import { Jquants, JP_PATHS, keyHint } from '../jquants.js';
 
+// reasonFrom はこのファイルで定義している（下）。keyHint は jquants.js から。
+
 /**
  * 疎通確認。
  *
@@ -38,11 +40,37 @@ export function reasonFrom(body: unknown): string {
   return JSON.stringify(obj).slice(0, 200);
 }
 
+/**
+ * `--path` で渡された「まだ確かめていない経路」。
+ *
+ * **ここに既定値を置かない。** 当てずっぽうのパスをコードに焼き付けて
+ * 403 を眺めたのが、このプロジェクトで一番高くついた失敗。
+ * 叩くのは人が明示的に渡したものだけにする。
+ */
+export interface ExtraProbe {
+  readonly path: string;
+  readonly params: Record<string, string>;
+}
+
+/** `key=value,key2=value2` を読む。空なら `{}`。 */
+export function parseParams(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of raw.split(',')) {
+    const i = pair.indexOf('=');
+    if (i <= 0) continue;
+    const k = pair.slice(0, i).trim();
+    const v = pair.slice(i + 1).trim();
+    if (k !== '') out[k] = v;
+  }
+  return out;
+}
+
 export async function runCheck(
   apiKey: string,
   baseUrl: string,
   date: string,
   probe?: Probe,
+  extra: readonly ExtraProbe[] = [],
 ): Promise<number> {
   // テストから差し込めるようにしてある。既定は本物のクライアント。
   const call: Probe = probe ?? ((path, params) => new Jquants(apiKey, baseUrl).probe(path, params));
@@ -83,6 +111,38 @@ export async function runCheck(
     const first = list[0];
     if (first !== undefined) {
       console.log(`    実際の項目名: ${Object.keys(first).join(', ')}`);
+    }
+  }
+
+  // **確かめていない経路は、ここで試す。** 既定の 3 本とは分けて出す。
+  // 通ったものだけを docs/DATA-SOURCES.md に日付付きで記録し、
+  // そのあとで初めてコードに書く。
+  if (extra.length > 0) {
+    console.log('\n--- 未確認の経路（--path で渡されたもの）---');
+    for (const e of extra) {
+      const { status, body } = await call(e.path, e.params);
+      const q = Object.entries(e.params)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('&');
+      const label = q === '' ? e.path : `${e.path}?${q}`;
+      if (status !== 200) {
+        console.log(`✗ ${label}  HTTP ${status}`);
+        const reason = reasonFrom(body);
+        if (reason !== '') console.log(`    → ${reason}`);
+        const hint = keyHint(status, body);
+        if (hint !== '') console.log(hint);
+        continue;
+      }
+      const rows = (body as Record<string, unknown>)['data'];
+      const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+      console.log(`✓ ${label}  ${list.length} 件`);
+      const first = list[0];
+      if (first !== undefined) {
+        console.log(`    実際の項目名: ${Object.keys(first).join(', ')}`);
+      } else {
+        // 200 だが空。経路は合っているが条件が違う可能性がある。
+        console.log(`    200 だが 0 件。日付や銘柄コードの指定を変えて試す`);
+      }
     }
   }
 

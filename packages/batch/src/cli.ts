@@ -1,5 +1,5 @@
 import { pathToFileURL } from 'node:url';
-import { runCheck } from './commands/check.js';
+import { runCheck, parseParams } from './commands/check.js';
 import { runBackfill } from './commands/backfill.js';
 import { runBacktestCommand } from './commands/backtest.js';
 import { runCheckSheet, runSheetSync, DEFAULT_RANGE } from './commands/sheet.js';
@@ -8,7 +8,7 @@ import { DEFAULT_BASE_URL } from './jquants.js';
 // テストから使う口。CLI 本体の引数解析やルール解決を、実行せずに確かめられるようにする。
 export { resolveRule, runBacktestCommand } from './commands/backtest.js';
 export { insertStatements, q } from './sql.js';
-export { runCheck, reasonFrom } from './commands/check.js';
+export { runCheck, reasonFrom, parseParams } from './commands/check.js';
 export { Jquants, keyHint, JP_PATHS } from './jquants.js';
 export { parseServiceAccount, signJwt, sheetHint } from './sheets.js';
 export {
@@ -41,6 +41,8 @@ const USAGE = `使い方
 
   check                              疎通・契約プラン・実際の項目名を確認する
     --date YYYY-MM-DD                既定は 3 営業日前
+    --path /a/b,/c/d                 **まだ確かめていない経路**も叩く（任意）
+    --param key=v,key2=v2            --path に付けるクエリ。既定は date だけ
 
   backfill                           過去の日足を取得して D1 用の .sql を書き出す
     --from YYYY-MM-DD  (必須)
@@ -117,7 +119,17 @@ async function main(): Promise<number> {
         console.error('JQUANTS_API_KEY が未設定。');
         return 1;
       }
-      return runCheck(apiKey, baseUrl, flags['date'] ?? recentWeekday(new Date(), 3));
+      const date = flags['date'] ?? recentWeekday(new Date(), 3);
+      // **--path で渡されたものだけを叩く。** 既定値は置かない。
+      // 当てずっぽうのパスをコードに焼き付けたのが一番高くついた失敗。
+      const extraParams =
+        flags['param'] === undefined ? { date } : parseParams(flags['param']);
+      const extra = (flags['path'] ?? '')
+        .split(',')
+        .map((p) => p.trim())
+        .filter((p) => p !== '')
+        .map((path) => ({ path, params: extraParams }));
+      return runCheck(apiKey, baseUrl, date, undefined, extra);
     }
     case 'backfill': {
       // **引数の検証を API キーより先に。** 引数の間違いはコマンドラインを

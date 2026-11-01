@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, keyHint, parseRows, parseSheetTimestamp, isStale, assembleSheetSync, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
+import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, keyHint, parseParams, parseRows, parseSheetTimestamp, isStale, assembleSheetSync, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
 
 test('引数の解析 — 値ありとフラグのみを区別する', () => {
   const a = parseArgs(['backfill', '--from', '2026-01-01', '--to', '2026-02-01', '--verbose']);
@@ -271,6 +271,106 @@ test('keyHint — キーが効いていない 403 は、置き場所 3 つを全
 
 test('keyHint — 401 もキー扱い', () => {
   assert.match(keyHint(401, {}), /Actions/);
+});
+
+// ---- 未確認の経路を試す（--path）---------------------------------------------
+//
+// **既定値を置かないことが要件。** 当てずっぽうのパスをコードに焼き付けて
+// 403 を眺めたのが一番高くついた失敗なので、叩くのは人が明示的に
+// 渡したものだけにする。
+
+async function captureCheckExtra(responses, extra) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.join(' '));
+  try {
+    const code = await runCheck(
+      'dummy-key',
+      'https://api.example.test/v2',
+      '2026-09-01',
+      async (path) => responses[path] ?? { status: 500, body: { message: '未定義の経路' } },
+      extra,
+    );
+    return { code, out: lines.join('\n') };
+  } finally {
+    console.log = original;
+  }
+}
+
+const ALL_OK = Object.fromEntries(
+  ['/equities/master', '/equities/bars/daily', '/markets/calendar'].map((p) => [
+    p,
+    { status: 200, body: { data: [{ Date: '2026-09-01', Code: '72030' }] } },
+  ]),
+);
+
+test('parseParams — key=value を読む', () => {
+  assert.deepEqual(parseParams('code=72030,date=2026-09-01'), {
+    code: '72030',
+    date: '2026-09-01',
+  });
+  // 値に = が入っていても先頭の = で切る
+  assert.deepEqual(parseParams('q=a=b'), { q: 'a=b' });
+  assert.deepEqual(parseParams(''), {});
+  assert.deepEqual(parseParams('こわれた'), {});
+});
+
+test('check — --path を渡さなければ、既定の 3 本以外は叩かない', async () => {
+  const seen = [];
+  const lines = [];
+  const original = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try {
+    await runCheck('k', 'https://api.example.test/v2', '2026-09-01', async (path) => {
+      seen.push(path);
+      return ALL_OK[path] ?? { status: 404, body: {} };
+    });
+  } finally {
+    console.log = original;
+  }
+  assert.deepEqual(seen.sort(), [
+    '/equities/bars/daily',
+    '/equities/master',
+    '/markets/calendar',
+  ]);
+  assert.ok(!lines.join('\n').includes('未確認の経路'), '渡していないのに節が出ている');
+});
+
+test('check — --path で渡した経路の結果をそのまま出す', async () => {
+  const { out } = await captureCheckExtra(
+    {
+      ...ALL_OK,
+      '/fins/statements': {
+        status: 200,
+        body: { data: [{ DisclosedDate: '2026-08-08', LocalCode: '72030' }] },
+      },
+    },
+    [{ path: '/fins/statements', params: { code: '72030' } }],
+  );
+  assert.match(out, /未確認の経路/);
+  assert.match(out, /\/fins\/statements\?code=72030/);
+  assert.match(out, /DisclosedDate/, '実際の項目名を出していない');
+});
+
+test('check — 未確認の経路が落ちても、必須 3 本が通っていれば成功扱い', async () => {
+  // 探索で叩いているだけなので、ここで終了コードを 1 にすると
+  // 「試す」行為そのものがやりにくくなる。
+  const { code, out } = await captureCheckExtra(
+    { ...ALL_OK, '/fins/statements': { status: 403, body: { message: 'not subscribed' } } },
+    [{ path: '/fins/statements', params: {} }],
+  );
+  assert.equal(code, 0);
+  assert.match(out, /not subscribed/, 'API の言い分を捨てている');
+});
+
+test('check — 200 でも 0 件なら、そう言う', async () => {
+  // 経路は合っているが条件が違う場合。ここを「✓」だけで済ませると、
+  // 取れていないのに取れたと誤解する。
+  const { out } = await captureCheckExtra(
+    { ...ALL_OK, '/fins/announcement': { status: 200, body: { data: [] } } },
+    [{ path: '/fins/announcement', params: {} }],
+  );
+  assert.match(out, /0 件/);
 });
 
 // ---- シート取り込み ----------------------------------------------------------

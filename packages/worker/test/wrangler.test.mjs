@@ -60,14 +60,25 @@ test('workers.dev を有効にしていない', () => {
   assert.match(CONFIG, /^workers_dev = false/m);
 });
 
-test('本番に LP とアプリのルートが 1 本ずつある', () => {
+test('本番のルートは、意図した宛先だけ', () => {
+  // **数を固定するのではなく、顔ぶれを固定する。**
+  // 守りたいのは「知らないホストにルートが向いていないこと」で、
+  // 本数そのものではない（www を足したときにここが落ちた）。
   const patterns = [...CONFIG.matchAll(/^pattern = "([^"]+)"/gm)].map((m) => m[1]);
-  assert.equal(patterns.length, 2, `ルートが ${patterns.length} 本ある`);
   const prod = readTable(CONFIG, 'env.production.vars');
   const lp = prod['LP_HOSTNAME'].replaceAll('"', '');
   const app = prod['APP_HOSTNAME'].replaceAll('"', '');
+
   assert.ok(patterns.includes(`${lp}/*`), `LP のルートが無い: ${patterns.join(', ')}`);
   assert.ok(patterns.includes(`${app}/*`), `アプリのルートが無い: ${patterns.join(', ')}`);
+
+  // www は apex へ 301 で寄せる（site.ts）。あってよい。
+  const allowed = new Set([`${lp}/*`, `${app}/*`, `www.${lp}/*`, `www.${app}/*`]);
+  const unexpected = patterns.filter((p) => !allowed.has(p));
+  assert.deepEqual(unexpected, [], `意図しないルートがある: ${unexpected.join(', ')}`);
+
+  // 同じ宛先を 2 度書いていないこと。
+  assert.equal(new Set(patterns).size, patterns.length, `重複したルートがある: ${patterns.join(', ')}`);
 });
 
 test('既定にはルートを書かない（wrangler dev がホストを模擬するため）', () => {

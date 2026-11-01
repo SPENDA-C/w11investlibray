@@ -100,10 +100,15 @@ zone_name = "goldencross-incomegains.com"
 pattern = "app.goldencross-incomegains.com/*"
 zone_name = "goldencross-incomegains.com"
 
-# www を使うなら足す。Worker が apex へ 301 で寄せる。
-# [[env.production.routes]]
-# pattern = "www.goldencross-incomegains.com/*"
-# zone_name = "goldencross-incomegains.com"
+# www は apex へ 301 で寄せる（site.ts の resolveSite）。
+#
+# **DNS 側に www のレコードが要る。** 無いとリクエストが Cloudflare まで
+# 届かないので、このルートは当たらない（害は無いが効きもしない）。
+# Cloudflare の DNS に www の CNAME（内容 goldencross-incomegains.com・
+# プロキシ オン）を足して初めて有効になる。
+[[env.production.routes]]
+pattern = "www.goldencross-incomegains.com/*"
+zone_name = "goldencross-incomegains.com"
 
 [[env.production.d1_databases]]
 binding = "INVEST_DB"
