@@ -127,13 +127,21 @@ export const WAITLIST_SCHEMA_PATH = fileURLToPath(
 export const QUOTES_SCHEMA_PATH = fileURLToPath(
   new URL('../../../../migrations/0003_quotes.sql', import.meta.url),
 );
+export const EARNINGS_SCHEMA_PATH = fileURLToPath(
+  new URL('../../../../migrations/0004_earnings.sql', import.meta.url),
+);
 
 export function makeEnv(overrides = {}) {
   return {
     // **マイグレーションを足したらここにも足す。** 足し忘れると、
     // 新しいテーブルを使う画面がテストでは「無い」ことになり、
     // 本番で初めて落ちる。
-    INVEST_DB: new FakeD1(SCHEMA_PATH, WAITLIST_SCHEMA_PATH, QUOTES_SCHEMA_PATH),
+    INVEST_DB: new FakeD1(
+      SCHEMA_PATH,
+      WAITLIST_SCHEMA_PATH,
+      QUOTES_SCHEMA_PATH,
+      EARNINGS_SCHEMA_PATH,
+    ),
     INVEST_R2: new FakeR2(),
     SITE_NAME: 'ゴールデンクロスーインカムゲインを究める資産運用',
     SITE_SHORT_NAME: 'ゴールデンクロス',

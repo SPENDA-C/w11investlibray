@@ -624,6 +624,45 @@ export async function latestQuotes(db: D1Database): Promise<QuoteRow[]> {
   return res.results ?? [];
 }
 
+export interface EarningsRow {
+  readonly symbol_id: string;
+  readonly code: string;
+  readonly name: string;
+  readonly announce_date: string;
+  readonly session: string | null;
+}
+
+/**
+ * ある月の発表予定。
+ *
+ * **市場で絞る。** 日本株と米国株でカレンダーを分けるので、
+ * `JP` と `US` を混ぜない。
+ *
+ * 同じ銘柄が複数の取得元から入ることがある（主キーに source が入っている）。
+ * **カレンダーには 1 銘柄 1 行で出す**ので、ここで畳む。
+ */
+export async function earningsForMonth(
+  db: D1Database,
+  market: string,
+  month: string,
+  limit = 400,
+): Promise<EarningsRow[]> {
+  const res = await db
+    .prepare(
+      `SELECT e.symbol_id, s.code, s.name, e.announce_date,
+              MAX(e.session) AS session
+         FROM earnings_calendar e
+         JOIN symbols s ON s.symbol_id = e.symbol_id
+        WHERE s.market = ?1 AND e.announce_date LIKE ?2
+        GROUP BY e.symbol_id, e.announce_date
+        ORDER BY e.announce_date, s.code
+        LIMIT ?3`,
+    )
+    .bind(market, `${month}-%`, limit)
+    .all<EarningsRow>();
+  return res.results ?? [];
+}
+
 /** 状態ごとの件数。画面の見出しに出す。 */
 export async function countWaitlist(db: D1Database): Promise<Record<string, number>> {
   const res = await db

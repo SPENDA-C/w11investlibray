@@ -1,5 +1,7 @@
 import type { Env } from '../types.js';
 import { lpPage } from '../ui/lp.js';
+import { parseMonth, formatMonth, calendarSection, type EarningsEntry } from '../ui/calendar.js';
+import { earningsForMonth } from '../db/queries.js';
 import { appUrl, lpBasePath, lpUrl } from '../site.js';
 import { handleWaitlist } from './waitlist.js';
 import { handleHealth } from './api.js';
@@ -11,6 +13,72 @@ import { LP_CSP } from '../headers.js';
  * ここから市場データに触れる経路を作らないこと（`INVEST_DB` を読むのは
  * 先行登録の書き込みだけ）。
  */
+/** カレンダー 1 枚ぶんの材料。 */
+export interface CalendarData {
+  readonly year: number;
+  readonly month: number;
+  readonly entries: EarningsEntry[];
+}
+
+/**
+ * 日本株と米国株、2 枚ぶんの材料を集める。
+ *
+ * 月はクエリ（`?cal-jp=2026-12`）で動かす。**壊れた値は既定の月に倒す。**
+ * ここで例外を投げると、カレンダーのせいで LP ごと落ちる。
+ */
+export async function earningsCalendars(
+  env: Env,
+  url: URL,
+  now = new Date(),
+): Promise<{ jp: CalendarData; us: CalendarData }> {
+  const current = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 };
+
+  const pick = async (anchor: string, market: string): Promise<CalendarData> => {
+    const asked = parseMonth(url.searchParams.get(anchor) ?? '');
+    const { year, month } = asked ?? current;
+    const rows = await earningsForMonth(env.INVEST_DB, market, formatMonth(year, month));
+    return {
+      year,
+      month,
+      entries: rows.map((r) => ({
+        symbolId: r.symbol_id,
+        code: r.code,
+        name: r.name,
+        announceDate: r.announce_date,
+        session: r.session,
+      })),
+    };
+  };
+
+  return { jp: await pick('cal-jp', 'JP'), us: await pick('cal-us', 'US') };
+}
+
+const EMPTY_NOTE =
+  'この月の発表予定はまだ取り込まれていません。取り込みが済むと、ここに銘柄が並びます。';
+
+/** 2 枚ぶんの HTML を組み立てる。 */
+export function renderCalendars(
+  data: { jp: CalendarData; us: CalendarData },
+  basePath: string,
+): { jp: string; us: string } {
+  return {
+    jp: calendarSection({
+      title: '日本株 決算発表カレンダー',
+      ...data.jp,
+      basePath,
+      anchor: 'cal-jp',
+      emptyNote: EMPTY_NOTE,
+    }),
+    us: calendarSection({
+      title: '米国株（Nasdaq）決算発表カレンダー',
+      ...data.us,
+      basePath,
+      anchor: 'cal-us',
+      emptyNote: EMPTY_NOTE,
+    }),
+  };
+}
+
 export async function handleLpRequest(
   request: Request,
   env: Env,
@@ -27,6 +95,7 @@ export async function handleLpRequest(
         shortName: env.SITE_SHORT_NAME,
         basePath: base,
         appUrl: target,
+        calendars: renderCalendars(await earningsCalendars(env, new URL(request.url)), base),
         ...(canonical.startsWith('https://') ? { canonicalUrl: canonical } : {}),
       }),
     );
