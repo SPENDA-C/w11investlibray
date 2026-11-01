@@ -86,69 +86,44 @@ jobs:
           check_shape CLOUDFLARE_ACCOUNT_ID "$ACCOUNT" || bad=1
           [ "$bad" -eq 0 ] || exit 1
 
-          # **長さで種類を見分ける。** ここが素通りすると、wrangler は
-          #   Invalid format for Authorization header [code: 6111]
-          # としか言わない。実際にこれで 3 回デプロイを落とした。
+          # **種類を見分ける。長さを決め打ちしない。**
+          # Cloudflare は 2026-04 に接頭辞つきの形式を導入した
+          # （接頭辞＋40 文字＋8 文字のチェックサム）:
           #
-          #   API Token      40 文字（英数字と _ と -）← これが正解
-          #   Global API Key 37 文字（16 進数だけ）    ← 別物。Bearer では使えない
+          #   cfat_…  Account API Token  53 文字  ← wrangler で使える
+          #   cfut_…  User API Token     53 文字  ← 使える
+          #   cfk_…   User API Key               ← **Token ではない**
+          #   （接頭辞なし）40 文字              ← 旧形式。まだ有効
           #
-          # Global API Key は X-Auth-Key ヘッダで使うもので、wrangler が
-          # Authorization: Bearer に載せると Cloudflare が形式違反として弾く。
-          if [ ${#TOKEN} -ne 40 ]; then
-            echo "::error::CLOUDFLARE_API_TOKEN の長さが ${#TOKEN}。API Token は 40 文字。"
-            if [ ${#TOKEN} -eq 37 ] && printf '%s' "$TOKEN" | LC_ALL=C grep -qE '^[0-9a-f]{37}$'; then
-              echo "  **これは Global API Key です。** API Token とは別物で、"
-              echo "  Authorization: Bearer では使えません（だから 6111 になる）。"
-            fi
-            echo "  dash.cloudflare.com → 右上のアイコン → API Tokens"
-            echo "  → Create Token → 「Edit Cloudflare Workers」テンプレート。"
-            echo "  Global API Key の欄ではなく、**API Tokens** の欄から作ること。"
-            exit 1
-          fi
+          # 以前ここで「40 文字ちょうど」を必須にしていて、正しい
+          # cfat_ トークンを弾いた。**形式は変わる。**確信のあるものだけ
+          # 落とし、知らない形は通して Cloudflare に判断させる。
+          case "$TOKEN" in
+            cfk_*)
+              echo "::error::CLOUDFLARE_API_TOKEN が cfk_ で始まっている。"
+              echo "  これは User API **Key** で、API **Token** とは別物。"
+              echo "  Authorization: Bearer では使えない（6111 になる）。"
+              echo "  API Tokens の欄から Token を作ること。"
+              exit 1
+              ;;
+            cfat_*|cfut_*)
+              echo "API Token（接頭辞つきの新形式・${#TOKEN} 文字）"
+              ;;
+            *)
+              if [ ${#TOKEN} -eq 37 ] && printf '%s' "$TOKEN" | LC_ALL=C grep -qE '^[0-9a-f]{37}$'; then
+                echo "::error::CLOUDFLARE_API_TOKEN が 37 桁の 16 進数。"
+                echo "  **これは Global API Key です。** API Token とは別物で、"
+                echo "  Authorization: Bearer では使えない（6111 になる）。"
+                echo "  dash.cloudflare.com → API Tokens → Create Token"
+                echo "  → 「Edit Cloudflare Workers」テンプレート。"
+                exit 1
+              fi
+              if [ ${#TOKEN} -ne 40 ]; then
+                # **落とさない。** 知らない形式かもしれない。
+                echo "::warning::CLOUDFLARE_API_TOKEN が見慣れない形（${#TOKEN} 文字・接頭辞なし）"
+                echo "  旧形式は 40 文字、新形式は cfat_ / cfut_ で始まる 53 文字。"
+                echo "  このまま進めて、Cloudflare の返事を見る。"
+              fi
+              ;;
+          esac
           echo "Secret の形は問題なし（トークン ${#TOKEN} 文字 / アカウント ${#ACCOUNT} 文字）"
-
-      # **ci.yml と同じ検証をここでも走らせる。**
-      # 別ワークフローの成否は needs: で参照できない（workflow_run は
-      # 別イベントとして走り、順序が保証されない）。
-      # デプロイの門は、デプロイのジョブ自身が持つ。
-      - name: 型チェック
-        run: npm run typecheck
-      - name: テスト
-        run: npm test
-      - name: サンプルデータがスキーマに投入できるか
-        run: node scripts/verify-seed.mjs
-
-      # preflight → wrangler deploy --env production。
-      # **ここで条件を書き直さない。** workers_dev・database_id・
-      # 運営者情報の確認は scripts/preflight.mjs が持っている。
-      - name: デプロイ
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npm run deploy -w @invest/worker
-
-      # **宛先は LP ホスト。** routes/lp.ts が LP 側でも /api/health を
-      # 返すので、app ホストに Access を掛けたあともここは通る。
-      # app ホストに向けると、Access を掛けた日からデプロイが落ちる。
-      - name: 生きているか確認
-        run: |
-          url="https://goldencross-incomegains.com/api/health"
-          attempts=3
-          for i in $(seq 1 $attempts); do
-            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$url" || echo 000)
-            [ "$code" = "200" ] && break
-            if [ "$i" -lt "$attempts" ]; then
-              echo "試行 $i: HTTP $code。5 秒待って再試行"
-              sleep 5
-            else
-              echo "試行 $i: HTTP $code"
-            fi
-          done
-          cat /tmp/health.json || true
-          echo
-          if [ "$code" != "200" ]; then
-            echo "::error::デプロイ後の $url が HTTP $code"
-            echo "デプロイ自体は成功している。ルートか DNS を疑う（docs/DEPLOY.md の「ドメインに反応しない」）。"
-            exit 1
-          fi

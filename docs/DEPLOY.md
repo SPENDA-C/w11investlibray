@@ -195,6 +195,30 @@ npm run preflight
 **必ず `--env production` を付けること。** 付け忘れるとルートの無い
 Worker が上がり、ドメインに反応しない。`npm run deploy` がそれを含んでいる。
 
+### Cloudflare のトークンは 2 種類あり、形式も変わった
+
+**API Key と API Token は別物。** wrangler が使えるのは **Token** のほう。
+
+| 接頭辞 | 種類 | wrangler で使えるか |
+|---|---|---|
+| `cfat_` | Account API Token（5 + 40 + 8 = 53 文字） | **使える** |
+| `cfut_` | User API Token（53 文字） | 使える |
+| `cfk_` | User API **Key** | 使えない |
+| 接頭辞なし・40 文字 | 旧形式の API Token | 使える |
+| 37 桁の 16 進 | Global API Key | 使えない |
+
+接頭辞つきの形式は Cloudflare が 2026-04 に導入した（接頭辞＋40 文字＋
+8 文字のチェックサム）。**旧形式のトークンもそのまま使える。**
+
+Key を Token の欄に入れると、wrangler は
+`Invalid format for Authorization header [code: 6111]` としか言わない。
+`Authorization: Bearer` に載せられない種類だから。
+
+> **長さを決め打ちで検査しない。** 一度 deploy.yml で「40 文字ちょうど」を
+> 必須にして、正しい `cfat_` トークン（53 文字）を弾いた。
+> 形式は変わる。確信のあるものだけ落とし、知らない形は通して
+> Cloudflare に判断させる。
+
 ### vars は `wrangler.toml` が正。ダッシュボードで入れると消える
 
 `[env.production.vars]`（`CF_ACCESS_TEAM_DOMAIN`・`CF_ACCESS_AUD`・
