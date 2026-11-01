@@ -52,6 +52,44 @@ jobs:
             exit 1
           fi
 
+          # **値の形も見る。** 登録されていても、改行や空白が一緒に
+          # 貼られていると wrangler は
+          #   Invalid format for Authorization header [code: 6111]
+          # としか言わない。どこが悪いのか分からないので、ここで先に言う。
+          # **値そのものは絶対に出力しない。** 長さと文字種だけを見る。
+          check_shape() {
+            name=$1
+            value=$2
+            len=${#value}
+            stripped=$(printf '%s' "$value" | tr -d '[:space:]')
+            if [ "${#stripped}" -ne "$len" ]; then
+              echo "::error::$name に空白か改行が混ざっている（長さ $len、空白を除くと ${#stripped}）"
+              echo "  コピーするとき、前後の改行や空白まで拾っている。"
+              echo "  Secret を開いて値を消し、トークンだけを貼り直す。"
+              return 1
+            fi
+            # **呼び出し側の bad を踏まないよう、別の名前にする。**
+            # 同じ名前にして happy path が壊れた（空文字で上書きされ、
+            # [ "$bad" -eq 0 ] が integer expression expected で落ちた）。
+            badchars=$(printf '%s' "$value" | LC_ALL=C tr -d 'A-Za-z0-9_-')
+            if [ -n "$badchars" ]; then
+              echo "::error::$name に使えない文字が入っている（${#badchars} 文字）"
+              echo "  使えるのは英数字と _ と - だけ。全角の記号や引用符が"
+              echo "  混ざっていないか確認する。"
+              return 1
+            fi
+            return 0
+          }
+
+          bad=0
+          check_shape CLOUDFLARE_API_TOKEN "$TOKEN" || bad=1
+          check_shape CLOUDFLARE_ACCOUNT_ID "$ACCOUNT" || bad=1
+          [ "$bad" -eq 0 ] || exit 1
+
+          # 長さは警告どまり。Cloudflare が形式を変えても止めないため。
+          [ ${#TOKEN} -ne 40 ] && echo "::warning::CLOUDFLARE_API_TOKEN の長さが ${#TOKEN}（通常は 40）"
+          echo "Secret の形は問題なし（トークン ${#TOKEN} 文字 / アカウント ${#ACCOUNT} 文字）"
+
       # **ci.yml と同じ検証をここでも走らせる。**
       # 別ワークフローの成否は needs: で参照できない（workflow_run は
       # 別イベントとして走り、順序が保証されない）。
