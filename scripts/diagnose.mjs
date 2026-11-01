@@ -60,7 +60,43 @@ export function buildUrls(config, env = {}) {
   };
 }
 
+/**
+ * 手元が origin より古くないかを見る。
+ *
+ * **これを足した理由も「打つ場所」と同じ種類。** pull を忘れたまま
+ * コマンドを打ち、`Missing script` や「フラグが効かない」で何度も
+ * 止まった。古いことに気付ける場所が無かったのが原因。
+ *
+ * `diagnose` は本番を見るときに必ず叩くので、ここに出す。
+ * **ネットワークを使わない**（`git fetch` しない）。手元にある
+ * 情報だけで判断するので、オフラインでも遅くならない。
+ */
+export function behindCount(run = (args) => spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' })) {
+  const head = run(['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (head.status !== 0) return null;
+  const branch = (head.stdout ?? '').trim();
+  if (branch === '' || branch === 'HEAD') return null;
+
+  const counts = run(['rev-list', '--left-right', '--count', `HEAD...origin/${branch}`]);
+  if (counts.status !== 0) return null;
+  const m = /^(\d+)\s+(\d+)/.exec((counts.stdout ?? '').trim());
+  if (m === null) return null;
+  return { ahead: Number(m[1]), behind: Number(m[2]), branch };
+}
+
+function reportFreshness() {
+  const s = behindCount();
+  if (s === null) return;
+  if (s.behind > 0) {
+    console.log(`⚠ 手元が origin より ${s.behind} コミット古い（${s.branch}）`);
+    console.log(`    git pull --rebase origin ${s.branch}`);
+    console.log('    古いままだと Missing script やフラグ無視として現れる');
+    console.log('');
+  }
+}
+
 function main() {
+  reportFreshness();
   const urls = buildUrls(readFileSync(CONFIG, 'utf8'), process.env);
 
   // **PowerShell 5.1 でも通るように呼ぶ。** -NoProfile は利用者のプロファイルに

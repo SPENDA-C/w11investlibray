@@ -260,6 +260,39 @@ test('diagnose の URL を wrangler.toml から組み立てる', async () => {
   assert.equal(readProdVar(config, 'NO_SUCH_KEY'), '');
 });
 
+test('diagnose が「手元が古い」ことを数えられる', async () => {
+  // **pull を忘れたまま打って 4 回止まった。** Missing script や
+  // 「フラグが効かない」として現れるので、原因に辿り着きにくい。
+  // diagnose は本番を見るとき必ず叩くので、ここに出す。
+  const { behindCount } = await import('../../../scripts/diagnose.mjs');
+
+  const fake = (out) => (args) =>
+    args[0] === 'rev-parse'
+      ? { status: 0, stdout: 'claude/feature\n' }
+      : { status: 0, stdout: out };
+
+  assert.deepEqual(behindCount(fake('0\t3\n')), { ahead: 0, behind: 3, branch: 'claude/feature' });
+  assert.deepEqual(behindCount(fake('2\t0\n')), { ahead: 2, behind: 0, branch: 'claude/feature' });
+
+  // **git が無い・リポジトリでない・上流が無いときは黙る。**
+  // 診断そのものを止めてはいけない。
+  assert.equal(behindCount(() => ({ status: 128, stdout: '' })), null);
+  assert.equal(
+    behindCount((args) =>
+      args[0] === 'rev-parse' ? { status: 0, stdout: 'HEAD\n' } : { status: 0, stdout: '0\t0\n' },
+    ),
+    null,
+    'detached HEAD で止まっていない',
+  );
+  // 上流が無ければ rev-list が失敗する
+  assert.equal(
+    behindCount((args) =>
+      args[0] === 'rev-parse' ? { status: 0, stdout: 'main\n' } : { status: 128, stdout: '' },
+    ),
+    null,
+  );
+});
+
 test('ルートから cd 無しで診断と一覧が打てる', () => {
   // 同じ失敗を 5 回踏んだ: リポジトリの外・packages\worker の中・その中でもう一度 cd。
   // どれも「打つ場所」の問題だったので、打つ場所を 1 つに畳んだ。
