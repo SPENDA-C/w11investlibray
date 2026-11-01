@@ -74,6 +74,23 @@ npm run check:datasource -- --path /fins/announcement
 
 通った経路と実際の項目名を、**下の表に日付付きで記録してから**コードに足すこと。
 
+#### 試して外れたもの（再挑戦しないため）
+
+```
+確認日:    2026-11-01
+外れ:      /fins/announcement   → 403 endpoint does not exist
+           /fins/statements     → 403 endpoint does not exist
+```
+
+**どちらも V1 の名前。** V2 には存在しない。経路の付け方は
+`/equities/master`・`/equities/bars/daily`・`/markets/calendar` の形
+（`/{領域}/{資源}`）なので、`/fins/...` という領域自体が無いと思われる。
+
+**正しい名前は API 自身が示す仕様ページにある:**
+https://jpx-jquants.com/spec/
+
+#### 当たったもの
+
 ```
 確認日:    （未記入）
 経路:      （未記入）
