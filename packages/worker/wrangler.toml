@@ -28,7 +28,7 @@ workers_dev = false
 binding = "INVEST_DB"
 database_name = "invest-db"
 # `wrangler d1 create invest-db` の出力を貼る
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "b54dbee8-bfc7-4bb9-a1b4-510ca6680116"
 
 [[r2_buckets]]
 binding = "INVEST_R2"
@@ -113,7 +113,7 @@ zone_name = "goldencross-incomegains.com"
 [[env.production.d1_databases]]
 binding = "INVEST_DB"
 database_name = "invest-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "b54dbee8-bfc7-4bb9-a1b4-510ca6680116"
 
 [[env.production.r2_buckets]]
 binding = "INVEST_R2"
