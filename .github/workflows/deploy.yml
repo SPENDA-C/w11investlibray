@@ -86,8 +86,26 @@ jobs:
           check_shape CLOUDFLARE_ACCOUNT_ID "$ACCOUNT" || bad=1
           [ "$bad" -eq 0 ] || exit 1
 
-          # 長さは警告どまり。Cloudflare が形式を変えても止めないため。
-          [ ${#TOKEN} -ne 40 ] && echo "::warning::CLOUDFLARE_API_TOKEN の長さが ${#TOKEN}（通常は 40）"
+          # **長さで種類を見分ける。** ここが素通りすると、wrangler は
+          #   Invalid format for Authorization header [code: 6111]
+          # としか言わない。実際にこれで 3 回デプロイを落とした。
+          #
+          #   API Token      40 文字（英数字と _ と -）← これが正解
+          #   Global API Key 37 文字（16 進数だけ）    ← 別物。Bearer では使えない
+          #
+          # Global API Key は X-Auth-Key ヘッダで使うもので、wrangler が
+          # Authorization: Bearer に載せると Cloudflare が形式違反として弾く。
+          if [ ${#TOKEN} -ne 40 ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN の長さが ${#TOKEN}。API Token は 40 文字。"
+            if [ ${#TOKEN} -eq 37 ] && printf '%s' "$TOKEN" | LC_ALL=C grep -qE '^[0-9a-f]{37}$'; then
+              echo "  **これは Global API Key です。** API Token とは別物で、"
+              echo "  Authorization: Bearer では使えません（だから 6111 になる）。"
+            fi
+            echo "  dash.cloudflare.com → 右上のアイコン → API Tokens"
+            echo "  → Create Token → 「Edit Cloudflare Workers」テンプレート。"
+            echo "  Global API Key の欄ではなく、**API Tokens** の欄から作ること。"
+            exit 1
+          fi
           echo "Secret の形は問題なし（トークン ${#TOKEN} 文字 / アカウント ${#ACCOUNT} 文字）"
 
       # **ci.yml と同じ検証をここでも走らせる。**
