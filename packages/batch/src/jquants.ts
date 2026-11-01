@@ -72,6 +72,17 @@ export function keyHint(status: number, body: unknown): string {
   if (status !== 401 && status !== 403) return '';
 
   const text = typeof body === 'string' ? body : JSON.stringify(body ?? '');
+
+  // **契約が切れている。** キーは正しいので、置き場所を案内すると
+  // まるごと誤案内になる（実際にそう出して遠回りさせた）。
+  if (/no active subscription|subscription status/i.test(text)) {
+    return `  → **契約が有効でない。** キーの置き場所の問題ではない。
+     https://jpx-jquants.com/ で契約状態を確認する。
+     無料プランも含めて「契約が無い」状態だと、最下位の経路も 403 になる。
+     支払いが止まっている・期間が終了している・解約済みのいずれか。
+     **契約を戻すまで、日次パイプラインも止まったままになる。**`;
+  }
+
   if (/endpoint does not exist/i.test(text)) {
     return `  → 経路が違う。**キーの問題ではない。**
      API Gateway は経路に一致しないリクエストへ 403 を返す。

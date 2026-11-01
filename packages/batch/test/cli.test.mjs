@@ -273,6 +273,30 @@ test('keyHint — 401 もキー扱い', () => {
   assert.match(keyHint(401, {}), /Actions/);
 });
 
+test('keyHint — 契約が切れている 403 は、キーの置き場所を案内しない', () => {
+  // **実際に出た 3 つ目の形**（2026-11-01）。
+  // キーは正しいのに「3 箇所を入れ直せ」と言うのは、まるごと誤案内。
+  const hint = keyHint(403, {
+    message: 'No active subscription found. Please check your subscription status.',
+  });
+  assert.match(hint, /契約/);
+  assert.match(hint, /jpx-jquants\.com/, '契約を見に行く先を出していない');
+  assert.doesNotMatch(hint, /Cloudflare/, 'キーの置き場所を案内してしまっている');
+  assert.doesNotMatch(hint, /wrangler secret/);
+});
+
+test('check — 契約切れのときは「経路が間違っている」と言わない', async () => {
+  // 全部 403 でも、本文が契約切れだと言っているなら経路の話は的外れ。
+  // **API 自身の言い分を、こちらの推論より優先する。**
+  const body = { message: 'No active subscription found. Please check your subscription status.' };
+  const { out } = await captureCheck(
+    Object.fromEntries(ALL_PATHS.map((p) => [p, { status: 403, body }])),
+  );
+  assert.match(out, /契約/);
+  assert.doesNotMatch(out, /経路が間違っている/, '的外れな診断を出している');
+  assert.doesNotMatch(out, /契約プランの範囲外ではない/, '本文と矛盾することを言っている');
+});
+
 // ---- 未確認の経路を試す（--path）---------------------------------------------
 //
 // **既定値を置かないことが要件。** 当てずっぽうのパスをコードに焼き付けて

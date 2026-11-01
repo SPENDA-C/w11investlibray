@@ -107,7 +107,22 @@ Your subscription covers the following dates: 2021-09-05 ~ .
 If you want more data, please check other plans
 ```
 
-403（経路違い・権限）と 400（範囲外）は別物。
+### 403 は 3 種類ある。**本文で見分ける**
+
+| 本文 | 意味 | 直すところ |
+|---|---|---|
+| `The requested endpoint does not exist` | 経路が違う | `JP_PATHS` |
+| `The incoming api key is invalid or expired` | キーが効いていない | キーの置き場所 3 箇所 |
+| `No active subscription found` | **契約が有効でない** | jpx-jquants.com の契約状態 |
+
+**3 つ目は 2026-11-01 に実際に出た。** 当初はこれを「キーが効いていない」と
+案内していて、正しいキーを持っている人に「3 箇所を入れ直せ」と言っていた。
+いまは `check:datasource` が本文で分けて、契約の話だと言う。
+
+**契約が切れている間は日次パイプラインも止まる。** 画面の数字が古いときは、
+まずここを疑う。
+
+403（経路違い・権限・契約）と 400（範囲外）は別物。
 `check --date 2021-09-02` で確認した（2026-09-05 時点）。
 
 ### 実際に返ってくる項目名（2026-09-05 / Light）

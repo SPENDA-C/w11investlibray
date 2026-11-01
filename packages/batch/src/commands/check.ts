@@ -87,6 +87,9 @@ export async function runCheck(
 
   let ok = 0;
   let forbidden = 0;
+  // **API が「契約が無い」と言ったか。** 言っているなら、こちらの推論
+  // （経路違いを疑う）は的外れになる。本文を推論より優先する。
+  let noSubscription = false;
   const missingRequired: string[] = [];
 
   for (const [label, path, params] of endpoints) {
@@ -100,6 +103,7 @@ export async function runCheck(
       const hint = keyHint(status, body);
       if (hint !== '') console.log(hint);
       if (status === 403) forbidden += 1;
+      if (/no active subscription|subscription status/i.test(reason)) noSubscription = true;
       if (REQUIRED.has(path)) missingRequired.push(path);
       continue;
     }
@@ -151,7 +155,13 @@ export async function runCheck(
   // **403 の意味は、1 本ずつでは決まらない。全体を見てから言う。**
   // /equities/master は最下位のプランでも通る。全部 403 なら
   // 「プランの範囲外」ではありえない。
-  if (ok === 0 && forbidden === endpoints.length) {
+  if (noSubscription) {
+    // **本文が答えを言っている。** こちらの推論を上書きする。
+    console.log(`すべて 403。**契約が有効でない**と API 自身が言っている。
+  経路の問題でもキーの置き場所の問題でもない。
+  https://jpx-jquants.com/ で契約状態を確認すること。
+  **この状態では日次パイプラインも止まっている。** 画面の数字が古いのはそのため。`);
+  } else if (ok === 0 && forbidden === endpoints.length) {
     console.log(`すべて 403。契約プランの範囲外ではない。
   ${JP_PATHS.master} は最下位のプランでも通るので、全部が 403 になる説明にならない。
   疑う順に:
