@@ -869,6 +869,19 @@ Next を押すとポリシーの画面になる。
 | Include | Selector `Emails` → Value に自分のメールアドレス |
 
 ログイン方法は既定の **One-time PIN** でよい（アクセス時にメールへ 6 桁が届く）。
+
+> ### **ポリシーを「全員（Everyone）」のままにしない**
+>
+> 一覧の「ポリシー」欄が **全員** になっていたら、**誰でも入れる。**
+> One-time PIN と組み合わさると、任意のメールアドレスで PIN を受け取れば
+> ダッシュボードが開く。**Access を掛けた意味がほぼ消える。**
+>
+> Include は必ず Selector `Emails` にして、自分のアドレスを入れること。
+> 一覧の「ポリシー」欄が自分で付けた名前（`運営者のみ` など）に
+> なっていれば直っている。
+>
+> `docs/DATA-SOURCES.md` の 2 が「自己利用の範囲に収める」と書いている
+> 前提は、ここが効いて初めて成り立つ。
 Google などを使いたい場合は Zero Trust → Settings → Authentication で足す。
 
 Save する。
@@ -881,7 +894,7 @@ Save する。
 
 | 変数 | どこにあるか | 形（照合の基準） |
 |---|---|---|
-| `CF_ACCESS_AUD` | Access → Applications → `invest-dashboard` の行をクリック → **Overview** タブ → **Application Audience (AUD) Tag**（コピー用のアイコンが付いている） | **64 桁の 16 進数** |
+| `CF_ACCESS_AUD` | Access → Applications → アプリの **Configure（設定）** → **Additional settings（追加設定）** → **Application Audience (AUD) Tag** | **64 桁の 16 進数** |
 | `CF_ACCESS_TEAM_DOMAIN` | Zero Trust → Settings → General の **Team domain** | **`.cloudflareaccess.com` で終わる** |
 
 > コンソールの文言や階層は変わることがある。迷ったら**値の形**で見分ける。
