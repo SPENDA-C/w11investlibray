@@ -339,6 +339,18 @@ test('parseParams — key=value を読む', () => {
   assert.deepEqual(parseParams('こわれた'), {});
 });
 
+test('check — 見出しに「追加経路=n」を出す（古いビルドの見分けがつくように）', async () => {
+  // --path を渡したのに何も起きないとき、古いビルドなのか経路が
+  // 全部外れたのか区別がつかなかった。見出しに数を出せば一目で分かる。
+  const none = await captureCheckExtra(ALL_OK, []);
+  assert.match(none.out, /追加経路=0/);
+  const two = await captureCheckExtra(ALL_OK, [
+    { path: '/a', params: {} },
+    { path: '/b', params: {} },
+  ]);
+  assert.match(two.out, /追加経路=2/);
+});
+
 test('check — --path を渡さなければ、既定の 3 本以外は叩かない', async () => {
   const seen = [];
   const lines = [];

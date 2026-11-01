@@ -74,7 +74,13 @@ export async function runCheck(
 ): Promise<number> {
   // テストから差し込めるようにしてある。既定は本物のクライアント。
   const call: Probe = probe ?? ((path, params) => new Jquants(apiKey, baseUrl).probe(path, params));
-  console.log(`J-Quants 疎通確認  base=${baseUrl}  date=${date}\n`);
+  // **`追加経路=` の行があるかどうかが、新しいビルドかの目印になる。**
+  // 古いビルドは --path を黙って無視するので、渡したのに何も起きない
+  // という分かりにくい形で失敗する（実際に 3 回取り違えた）。
+  console.log(`J-Quants 疎通確認  base=${baseUrl}  date=${date}  追加経路=${extra.length}\n`);
+  if (extra.length === 0) {
+    console.log('（--path を渡すと、まだ確かめていない経路も試せる）\n');
+  }
 
   // **財務（Phase 1b）はここに入れない。** V2 での経路を確認できていないので、
   // 当てずっぽうのパスを置いて 403 を眺めることになる——それが今回の失敗そのもの。
