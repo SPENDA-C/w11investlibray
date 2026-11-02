@@ -256,7 +256,22 @@ test('diagnose の URL を wrangler.toml から組み立てる', async () => {
   assert.equal(overridden.APP_URL, 'https://app.goldencross-incomegains.com');
 
   // **既定側の同名キーを拾わないこと。** [env.production.vars] だけを見る。
-  assert.equal(readProdVar(config, 'CF_ACCESS_AUD'), '', '空の値は空で返す');
+  // 実ファイルの値に頼らず、作った設定で確かめる——Access を設定したら
+  // CF_ACCESS_AUD が埋まって、このテストが落ちた。
+  const fixture = [
+    '[vars]',
+    'SAMPLE = "既定側の値"',
+    '',
+    '[env.production.vars]',
+    'SAMPLE = "本番側の値"',
+    'EMPTY = ""',
+    '',
+    '[env.production.routes]',
+    'SAMPLE = "セクション外"',
+  ].join('\n');
+  assert.equal(readProdVar(fixture, 'SAMPLE'), '本番側の値', '既定側を拾っている');
+  assert.equal(readProdVar(fixture, 'EMPTY'), '', '空の値は空で返す');
+  assert.equal(readProdVar(fixture, 'NO_SUCH_KEY'), '');
   assert.equal(readProdVar(config, 'NO_SUCH_KEY'), '');
 });
 
@@ -303,6 +318,35 @@ test('set:access — 値の形で見分け、本番側だけに書く', async ()
 
   // セクションが無ければ黙って成功しない
   assert.equal(applyToProdVars('[vars]\nX = ""', 'CF_ACCESS_AUD', aud).ok, false);
+});
+
+test('set:access — 「まだ空」は引数ではなくファイルの状態で判定する', async () => {
+  // **誤報を出した。** 片方だけ渡したとき、渡さなかったほうを
+  // 「まだ空」と言っていた。実際には既に入っていたので、
+  // 設定が済んでいるのに済んでいないように見えた。
+  const { emptyProdVars } = await import('../../../scripts/set-access.mjs');
+
+  const filled = [
+    '[vars]',
+    'CF_ACCESS_TEAM_DOMAIN = ""',
+    '',
+    '[env.production.vars]',
+    'CF_ACCESS_TEAM_DOMAIN = "team-x.cloudflareaccess.com"',
+    `CF_ACCESS_AUD = "${'a'.repeat(64)}"`,
+    '',
+    '[env.production.routes]',
+  ].join('\n');
+  assert.deepEqual(emptyProdVars(filled, ['CF_ACCESS_TEAM_DOMAIN', 'CF_ACCESS_AUD']), []);
+
+  const half = filled.replace(`CF_ACCESS_AUD = "${'a'.repeat(64)}"`, 'CF_ACCESS_AUD = ""');
+  assert.deepEqual(emptyProdVars(half, ['CF_ACCESS_TEAM_DOMAIN', 'CF_ACCESS_AUD']), ['CF_ACCESS_AUD']);
+
+  // **既定側が空でも、本番側が埋まっていれば空と言わない。**
+  assert.deepEqual(emptyProdVars(filled, ['CF_ACCESS_TEAM_DOMAIN']), []);
+
+  // 行が無い・セクションが無いときは空として扱う
+  assert.deepEqual(emptyProdVars('[env.production.vars]\n', ['CF_ACCESS_AUD']), ['CF_ACCESS_AUD']);
+  assert.deepEqual(emptyProdVars('[vars]\n', ['CF_ACCESS_AUD']), ['CF_ACCESS_AUD']);
 });
 
 test('diagnose が「手元が古い」ことを数えられる', async () => {

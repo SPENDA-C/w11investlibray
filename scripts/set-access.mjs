@@ -65,6 +65,33 @@ export function applyToProdVars(config, key, value) {
   return { ok: false, reason: `[env.production.vars] に ${key} の行が無い` };
 }
 
+/**
+ * `[env.production.vars]` の中で、まだ空のキーを返す。
+ *
+ * **ファイルの状態を見る。** 引数に何を渡したかではない。
+ * 片方ずつ渡すのが普通の使い方なので、引数で判定すると必ず誤報になる。
+ */
+export function emptyProdVars(config, keys) {
+  const lines = config.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim() === '[env.production.vars]');
+  if (start === -1) return [...keys];
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (lines[i].trimStart().startsWith('[')) {
+      end = i;
+      break;
+    }
+  }
+  const body = lines.slice(start + 1, end);
+  return keys.filter((key) => {
+    const pattern = new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"`);
+    // find は見つからないと undefined を返す（null ではない）。
+    // そこを null だけで判定して落ちた。
+    const m = body.map((l) => pattern.exec(l)).find((x) => x !== null) ?? null;
+    return m === null || m[1].trim() === '';
+  });
+}
+
 const CONFIG_PATH = fileURLToPath(new URL('../packages/worker/wrangler.toml', import.meta.url));
 
 function main(argv) {
@@ -111,10 +138,10 @@ function main(argv) {
   writeFileSync(CONFIG_PATH, config);
   for (const key of done) console.log(`✓ ${key} を [env.production.vars] に書いた`);
 
-  const missing = [
-    teamDomain === null ? 'CF_ACCESS_TEAM_DOMAIN' : null,
-    aud === null ? 'CF_ACCESS_AUD' : null,
-  ].filter((x) => x !== null);
+  // **引数ではなく、書き終えたファイルの中身を見る。**
+  // 渡されなかったキーを「空」と報告していて、既に入っている値まで
+  // 空だと言っていた（片方ずつ渡したときに必ず誤報になる）。
+  const missing = emptyProdVars(config, ['CF_ACCESS_TEAM_DOMAIN', 'CF_ACCESS_AUD']);
   if (missing.length > 0) {
     console.log(`\nまだ空: ${missing.join(', ')}`);
     console.log('**両方そろって初めて Access の検証が有効になる。**');
