@@ -139,7 +139,7 @@ QUOTES_PUBLIC_ENABLED = "false"
 # **Cloudflare Access のアプリケーションを作ったら埋める。**
 # 空のままだと画面上部に赤い警告が出る（docs/DEPLOY.md 手順 9）。
 CF_ACCESS_TEAM_DOMAIN = "weathered-frost-70c2.cloudflareaccess.com"
-CF_ACCESS_AUD = ""
+CF_ACCESS_AUD = "089133a76709256e7e28a03725e4590c96cfab9afa54fd3d38f547497065a7f4"
 JQUANTS_BASE_URL = "https://api.jquants.com/v2"
 JQUANTS_FIELD_ALIASES = "{}"
 
