@@ -689,3 +689,56 @@ test('migrate.yml は一覧をハードコードしない', () => {
   assert.match(yml, /--env production/, '本番の D1 を指していない');
   assert.ok(!/0004_earnings\.sql/.test(yml), 'ファイル名を個別に書いている');
 });
+
+// ---- デプロイの workflow が本当にデプロイすること -----------------------------
+//
+// **「デプロイ」が何もせずに緑を返していた。** トークン長の検査を直したとき
+// （067d5ff）に、型チェック・テスト・デプロイ・疎通確認の 5 ステップを
+// まるごと消してしまった。以後、公開サイトは古い版のまま、
+// workflow は毎回 success。**緑なので誰も気付けない。**
+
+test('deploy.yml が実際にデプロイする', () => {
+  const yml = readFileSync(
+    fileURLToPath(new URL('../../../.github/workflows/deploy.yml', import.meta.url)),
+    'utf8',
+  );
+  // 本体。これが無いと、確認だけして何も出さない workflow になる。
+  assert.match(yml, /npm run deploy -w @invest\/worker/, 'wrangler deploy を呼んでいない');
+
+  // デプロイの門（ci.yml の成否は needs: で参照できない）
+  for (const [what, re] of [
+    ['型チェック', /npm run typecheck/],
+    ['テスト', /npm test/],
+    ['サンプル投入', /verify-seed\.mjs/],
+    ['疎通確認', /api\/health/],
+  ]) {
+    assert.match(yml, re, `deploy.yml に${what}が無い`);
+  }
+});
+
+test('deploy.yml が、出した版が配信されているかまで見る', () => {
+  // /api/health は中身が変わらないので、**古い版が配信されていても 200。**
+  // 公開ページの中身そのものを見ないと気付けない。
+  const yml = readFileSync(
+    fileURLToPath(new URL('../../../.github/workflows/deploy.yml', import.meta.url)),
+    'utf8',
+  );
+  assert.match(yml, /出した版が配信されているか/, '配信物の確認が無い');
+  assert.match(yml, /<script/, 'LP に script が増えていないかを見ていない');
+  assert.match(yml, /fonts\.gstatic\.com/, '許す外部ホストの一覧が無い');
+});
+
+test('LP のコードは script も許していない外部ホストも出さない', async () => {
+  // **配信時に Cloudflare が足すものと切り分けるため、コード側を固定する。**
+  // ここが 0 なら、公開ページに出た <script> は必ず配信側の差し込み。
+  const { lpPage } = await import('../.build/worker.mjs');
+  const html = lpPage({ siteName: 's', shortName: 's', basePath: '', appUrl: '/' });
+  assert.ok(!/<script/i.test(html), 'LP のコードが <script> を出している');
+
+  const allowed = ['fonts.googleapis.com', 'fonts.gstatic.com', 'www.w3.org'];
+  const hosts = new Set([...html.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1]));
+  const extra = [...hosts].filter(
+    (h) => !allowed.includes(h) && !h.endsWith('goldencross-incomegains.com'),
+  );
+  assert.deepEqual(extra, [], `LP が許していない外部ホストを出している: ${extra.join(', ')}`);
+});
