@@ -628,3 +628,64 @@ test('check-d1-token — D1 の全滅を権限不足と決めつけない', asyn
   assert.ok(!/cfat_）が D1 に通らない/.test(user.text), '関係ない線を出している');
   assert.match(user.text, /Secret が、編集した/);
 });
+
+// ---- マイグレーションを本番に当てる ------------------------------------------
+//
+// 決算カレンダーの取り込みが `no such table: earnings_calendar` で落ちた。
+// 0003 / 0004 を本番に当てていなかった。**気付く方法が無かった**ので、
+// 当て漏れが起きにくい形に寄せる。
+
+test('マイグレーションは何度流しても壊れない', () => {
+  // migrate.yml は 0001 から全部を毎回流す。**途中から当てる判断をしない**
+  // （どこまで当たっているかを人間が覚えておく形にしない）。
+  // それが成り立つのは、すべての CREATE が IF NOT EXISTS だから。
+  const dir = fileURLToPath(new URL('../../../migrations', import.meta.url));
+  const files = readdirSync(dir).filter((f) => f.endsWith('.sql'));
+  assert.ok(files.length > 0, 'migrations/ が空');
+
+  for (const name of files) {
+    const sql = readFileSync(join(dir, name), 'utf8');
+    for (const m of sql.matchAll(/^\s*CREATE\s+(TABLE|INDEX|VIEW|TRIGGER)\b(.*)$/gim)) {
+      assert.match(
+        m[0],
+        /IF NOT EXISTS/i,
+        `${name} の「${m[0].trim()}」に IF NOT EXISTS が無い。2 回目で落ちる`,
+      );
+    }
+    // 2 回流すと値が重複するものを置かない
+    for (const bad of [/^\s*INSERT\s/im, /^\s*ALTER\s/im]) {
+      assert.ok(!bad.test(sql), `${name} に流し直せない文がある`);
+    }
+  }
+});
+
+test('db:migrate:remote が migrations/ を取りこぼさない', () => {
+  // **一覧がハードコードしてある。** 連番を足したときに書き忘れると、
+  // 本番にだけ当たらない表ができる（今回それで止まった）。
+  const dir = fileURLToPath(new URL('../../../migrations', import.meta.url));
+  const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+  const worker = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+  );
+  for (const key of ['db:migrate:local', 'db:migrate:remote']) {
+    const cmd = worker.scripts[key];
+    for (const f of files) {
+      assert.ok(cmd.includes(f), `${key} が ${f} を流していない`);
+    }
+  }
+  // 当てる順序も崩さない（外部キーがあるので 0001 が先）
+  const order = files.map((f) => worker.scripts['db:migrate:remote'].indexOf(f));
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), '連番の順に流していない');
+});
+
+test('migrate.yml は一覧をハードコードしない', () => {
+  // 書き忘れが起きない形にしておく。ファイルを足すだけで当たる。
+  const yml = readFileSync(
+    fileURLToPath(new URL('../../../.github/workflows/migrate.yml', import.meta.url)),
+    'utf8',
+  );
+  assert.match(yml, /migrations\/\*\.sql/, 'glob で拾っていない');
+  assert.match(yml, /sort/, '連番の順に並べていない');
+  assert.match(yml, /--env production/, '本番の D1 を指していない');
+  assert.ok(!/0004_earnings\.sql/.test(yml), 'ファイル名を個別に書いている');
+});

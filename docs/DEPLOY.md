@@ -84,6 +84,27 @@ npm run db:migrate:remote -w @invest/worker   # 0001 と 0002 を順に適用す
 
 ---
 
+## 3.5 マイグレーションを本番 D1 に当てる
+
+**連番を足したら、本番にも当てる。** 当て忘れると、取り込みが
+`no such table: ○○` で落ちる（2026-11-03 に 0003 / 0004 でこれが起きた）。
+
+**Actions からやるのが楽**（手元で wrangler を走らせる場所の問題が無い）:
+
+> Actions → **マイグレーションを適用** → Run workflow → `apply` に ☑
+
+手元からやるなら、**リポジトリの中で**:
+
+```bash
+npm run db:migrate:remote -w @invest/worker
+```
+
+**何度流しても壊れない。** すべての `CREATE` が `IF NOT EXISTS` で書いてある
+（`npm test` がこれを検査しているので、書き忘れると落ちる）。
+どこまで当たっているかを覚えておく必要はない。毎回 0001 から全部流す。
+
+---
+
 ## 4. Secret を登録する
 
 ### `CLOUDFLARE_API_TOKEN` に要る権限

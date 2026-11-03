@@ -1,0 +1,81 @@
+name: マイグレーションを適用
+
+# 本番 D1 に migrations/*.sql を流す。**手動実行のみ。**
+#
+# **足した理由。** 決算カレンダーの取り込みが
+# `no such table: earnings_calendar` で落ちた。0003 / 0004 を本番に
+# 当てていなかった。手元から当てるには wrangler をリポジトリの中で
+# 走らせる必要があり、**打つ場所の問題で何度も止まっている。**
+# データが通る経路は Actions に寄せてあるので、これもここに置く。
+#
+# **流す順序が意味を持つ。** 外部キーがあるので 0001 から順に当てる。
+# ファイル名がゼロ埋めなので sort の順で正しい。
+#
+# **何度流しても壊れない。** すべての CREATE が IF NOT EXISTS で書いてある
+# （test/scripts.test.mjs がこれを検査している）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: '実際に流す（外すと、当てる順に並べて見せるだけ）'
+        type: boolean
+        default: false
+
+concurrency:
+  group: migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      # **一覧をハードコードしない。** migrations/ に足したファイルを
+      # workflow 側に書き忘れると、本番にだけ当たらない表ができる。
+      - name: 当てる順に並べる
+        id: plan
+        run: |
+          shopt -s nullglob
+          files=(migrations/*.sql)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::migrations/*.sql が無い"
+            exit 1
+          fi
+          printf '%s\n' "${files[@]}" | sort | tee /tmp/plan.txt
+          echo "件数: ${#files[@]}"
+
+      - name: 本番 D1 に流す
+        if: ${{ inputs.apply }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: packages/worker
+        # **--env production を落とさないこと。** 付けないと wrangler は
+        # 既定の [[d1_databases]] を見に行く。本番を指しているのは
+        # [[env.production.d1_databases]] のほう。
+        run: |
+          while IFS= read -r f; do
+            echo "::group::$f"
+            npx wrangler d1 execute invest-db --remote --env production --file="../../$f"
+            echo "::endgroup::"
+          done < /tmp/plan.txt
+
+      - name: 流していないことを伝える
+        if: ${{ !inputs.apply }}
+        run: echo "::notice::apply にチェックを入れると実際に流す。"
+
+      # 落ちた理由を推測で案内しない（earnings.yml と同じ）。
+      - name: 落ちたら D1 の権限を測る
+        if: failure()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/check-d1-token.mjs

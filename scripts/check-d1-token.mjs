@@ -104,8 +104,14 @@ export function verdict({
     return {
       ok: true,
       text: `取り込みの経路まで通った。**トークンの権限は足りている。**
-     さっきの失敗が続くなら、原因は権限ではない。もう一度流して、
-     違うメッセージが出ないか見る。`,
+     落ちた原因は権限ではない。wrangler の最後のメッセージを読む。
+
+     よくあるのはこれ:
+       no such table: ○○  → **本番 D1 にマイグレーションが当たっていない。**
+         Actions の「マイグレーションを適用」を apply ☑ で実行する。
+         何度流しても壊れない（すべて IF NOT EXISTS）。
+       FOREIGN KEY constraint failed
+         → 親の行（symbols など）より先に子を入れている。`,
     };
   }
 
