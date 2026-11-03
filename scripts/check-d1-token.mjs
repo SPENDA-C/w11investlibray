@@ -1,0 +1,201 @@
+/**
+ * **D1 のトークン権限を測る。** `npm run check:d1token`。
+ *
+ * 足した理由。`wrangler d1 execute --remote --file` が
+ * `Authentication error [code: 10000]` で落ちたとき、wrangler の
+ * メッセージは「権限を確認してください」としか言わない。
+ * **どの権限が足りないのかも、そもそも権限の問題なのかも分からない。**
+ *
+ * 当てずっぽうで「D1:Edit を足してください」と案内すると、違ったときに
+ * 一往復無駄になる（このリポジトリで何度もやった失敗）。なので
+ * **実際に API を叩いて、どこまで通るかを測る。**
+ *
+ * 測る経路は 3 つ。`--file` が使うのは 3 つ目だけ。
+ *
+ *   1. GET  /accounts/{a}/d1/database          一覧（D1 の読み）
+ *   2. POST /accounts/{a}/d1/database/{db}/query   問い合わせ（`--command` の経路）
+ *   3. POST /accounts/{a}/d1/database/{db}/import  取り込み（`--file` の経路）
+ *
+ * 3 は `action: "init"` だけ送る。**データベースの中身は変えない**
+ * （アップロード先の URL を返すだけで、SQL をまだ送っていない）。
+ *
+ * **トークンの値は一切出力しない。** 出すのは長さと種類だけ。
+ */
+
+import { pathToFileURL } from 'node:url';
+
+const API = 'https://api.cloudflare.com/client/v4';
+
+/** `wrangler.toml` から本番の `database_id` を取る。TOML を丸ごと解釈しない。 */
+export function readDatabaseId(config) {
+  const lines = config.split(/\r?\n/);
+  let inProd = false;
+  let fallback = '';
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith('[')) {
+      inProd = t === '[[env.production.d1_databases]]';
+      continue;
+    }
+    const m = /^database_id\s*=\s*"([^"]*)"/.exec(t);
+    if (m === null) continue;
+    if (inProd) return m[1];
+    if (fallback === '') fallback = m[1];
+  }
+  return fallback;
+}
+
+/**
+ * トークンの見た目だけを言う。**値は返さない。**
+ *
+ * 2026 年 4 月に前置きが入った（`cfat_` = アカウント、`cfut_` = ユーザー）。
+ * この 2 つの違いが効く場面があるので、種類は見える形にしておく。
+ */
+export function tokenShape(token) {
+  if (typeof token !== 'string' || token === '') return { kind: 'なし', length: 0 };
+  const length = token.length;
+  if (token.startsWith('cfat_')) return { kind: 'アカウント API トークン (cfat_)', length };
+  if (token.startsWith('cfut_')) return { kind: 'ユーザー API トークン (cfut_)', length };
+  if (token.startsWith('cfk_')) return { kind: 'ユーザー API キー (cfk_)', length };
+  if (/^[0-9a-f]{37}$/i.test(token)) return { kind: 'グローバル API キー', length };
+  if (/^[A-Za-z0-9_-]{40}$/.test(token)) return { kind: '前置き無しの旧トークン', length };
+  return { kind: '不明', length };
+}
+
+/**
+ * 3 つの結果から、次にやることを 1 つに決める。
+ *
+ * **測った事実の外に出ない。** 分からないときは分からないと言う。
+ */
+export function verdict({ list, query, importInit }) {
+  const ok = (r) => r.status >= 200 && r.status < 300;
+
+  // **届かなかったことを「権限が無い」と言わない。** status 0 は
+  // 返事が来なかったという意味しかない。ここを混ぜると、回線が
+  // 一度こけただけでトークンを作り直させることになる。
+  if ([list, query, importInit].every((r) => r.status === 0)) {
+    return {
+      ok: false,
+      text: `**Cloudflare の API に届いていない**（返事が来ていない）。
+     これは権限の話ではないので、トークンをいじらない。
+     回線か api.cloudflare.com への経路を見てから、もう一度測る。`,
+    };
+  }
+
+  if (ok(importInit)) {
+    return {
+      ok: true,
+      text: `取り込みの経路まで通った。**トークンの権限は足りている。**
+     さっきの失敗が続くなら、原因は権限ではない。もう一度流して、
+     違うメッセージが出ないか見る。`,
+    };
+  }
+
+  if (!ok(list) && !ok(query)) {
+    return {
+      ok: false,
+      text: `**D1 をまったく触れていない**（一覧も問い合わせも通らない）。
+     トークンに D1 の権限が入っていない。
+     https://dash.cloudflare.com/profile/api-tokens でこのトークンを編集し、
+     **アカウント → D1 → 編集** を足す。`,
+    };
+  }
+
+  if (ok(query) && !ok(importInit)) {
+    return {
+      ok: false,
+      text: `**問い合わせは通るのに、取り込みだけ弾かれている。**
+     D1 の権限そのものは入っている。import だけが別の判定をしている。
+     試す順に 2 つ:
+       1. トークンに **アカウント → D1 → 編集** が入っているか見る
+          （読み取りだけだと問い合わせが通って取り込みが落ちる）
+       2. それでも同じなら、**ユーザー API トークン（cfut_）を作り直す。**
+          アカウント API トークン（cfat_）が import で弾かれた報告がある。
+          作る場所: https://dash.cloudflare.com/profile/api-tokens
+          （「アカウント所有」ではなく、自分のプロフィール側で作る）`,
+    };
+  }
+
+  return {
+    ok: false,
+    text: `一覧は通ったが、問い合わせと取り込みが通らない。
+     トークンが **読み取りだけ**の可能性が高い。
+     **アカウント → D1 → 編集** を足す。`,
+  };
+}
+
+async function probe(fetchImpl, label, url, init) {
+  try {
+    const res = await fetchImpl(url, init);
+    let code = '';
+    try {
+      const body = await res.json();
+      code = (body?.errors ?? []).map((e) => `${e.code}: ${e.message}`).join(' / ');
+    } catch {
+      code = '(本文が JSON でない)';
+    }
+    return { label, status: res.status, code };
+  } catch (err) {
+    return { label, status: 0, code: `到達できない: ${err.message}` };
+  }
+}
+
+export async function run({ token, accountId, databaseId, fetchImpl = fetch }) {
+  const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const base = `${API}/accounts/${accountId}/d1/database/${databaseId}`;
+
+  const list = await probe(
+    fetchImpl, '1. 一覧 (D1 の読み)', `${API}/accounts/${accountId}/d1/database`, { headers },
+  );
+  const query = await probe(fetchImpl, '2. 問い合わせ (--command の経路)', `${base}/query`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ sql: 'SELECT 1' }),
+  });
+  // init だけ。SQL はまだ送らないので、**データベースの中身は変わらない。**
+  const importInit = await probe(fetchImpl, '3. 取り込み (--file の経路)', `${base}/import`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'init', etag: '0'.repeat(32) }),
+  });
+  return { list, query, importInit };
+}
+
+async function main() {
+  const token = process.env.CLOUDFLARE_API_TOKEN ?? '';
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? '';
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const config = readFileSync(
+    fileURLToPath(new URL('../packages/worker/wrangler.toml', import.meta.url)),
+    'utf8',
+  );
+  const databaseId = readDatabaseId(config);
+
+  const shape = tokenShape(token);
+  console.log(`D1 トークン権限の確認`);
+  console.log(`  トークン: ${shape.kind} / ${shape.length} 文字（値は出さない）`);
+  console.log(`  アカウント: ${accountId === '' ? '**未設定**' : `設定あり（${accountId.length} 文字）`}`);
+  console.log(`  データベース: ${databaseId === '' ? '**wrangler.toml から読めない**' : databaseId}\n`);
+
+  if (token === '' || accountId === '' || databaseId === '') {
+    console.error('CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID が要る。');
+    process.exitCode = 1;
+    return;
+  }
+
+  const results = await run({ token, accountId, databaseId });
+  for (const r of [results.list, results.query, results.importInit]) {
+    const mark = r.status >= 200 && r.status < 300 ? '✓' : '✗';
+    console.log(`${mark} ${r.label}  HTTP ${r.status}${r.code === '' ? '' : `  ${r.code}`}`);
+  }
+
+  const v = verdict(results);
+  console.log(`\n${v.ok ? '→' : '→'} ${v.text}\n`);
+  process.exitCode = v.ok ? 0 : 1;
+}
+
+// 直接呼ばれたときだけ走る（テストから import しても何も起きない）。
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

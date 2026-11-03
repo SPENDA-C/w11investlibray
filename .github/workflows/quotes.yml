@@ -109,3 +109,14 @@ jobs:
         # **--env production を落とさないこと。** 付けないと wrangler は
         # 既定の [[d1_databases]] を見に行く。
         run: npx wrangler d1 execute invest-db --remote --env production --file=../../out/quotes.sql
+
+      # **落ちた理由を推測で案内しない。** wrangler は
+      # 「Authentication error [code: 10000] / 権限を確認してください」としか
+      # 言わないので、どこまで通るかを実際に測って、次にやることを 1 つに絞る。
+      # トークンの値は出さない（長さと種類だけ）。
+      - name: 落ちたら D1 の権限を測る
+        if: failure()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/check-d1-token.mjs

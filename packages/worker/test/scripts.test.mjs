@@ -399,3 +399,112 @@ test('ルートから cd 無しで診断と一覧が打てる', () => {
   assert.match(worker.scripts['waitlist'], /--env production/);
   assert.match(worker.scripts['waitlist'], /--remote/);
 });
+
+// ---- D1 のトークン権限を測る -------------------------------------------------
+//
+// wrangler の `Authentication error [code: 10000]` は
+// 「権限を確認してください」としか言わない。**どの権限が足りないのかを
+// 推測で案内しない**ために、実際に測った結果だけから次の 1 手を決める。
+
+test('check-d1-token — 本番の database_id を取る（既定側と取り違えない）', async () => {
+  const { readDatabaseId } = await import('../../../scripts/check-d1-token.mjs');
+  const toml = [
+    '[[d1_databases]]',
+    'binding = "INVEST_DB"',
+    'database_id = "local-one"',
+    '',
+    '[[env.production.d1_databases]]',
+    'binding = "INVEST_DB"',
+    'database_id = "prod-one"',
+  ].join('\n');
+  assert.equal(readDatabaseId(toml), 'prod-one', '既定側の id を拾っている');
+  assert.equal(readDatabaseId('[[d1_databases]]\ndatabase_id = "only"'), 'only');
+  assert.equal(readDatabaseId(''), '');
+});
+
+test('check-d1-token — 実物の wrangler.toml から読める', async () => {
+  const { readDatabaseId } = await import('../../../scripts/check-d1-token.mjs');
+  const toml = readFileSync(fileURLToPath(new URL('../wrangler.toml', import.meta.url)), 'utf8');
+  assert.match(readDatabaseId(toml), /^[0-9a-f-]{36}$/, 'database_id が読めていない');
+});
+
+test('check-d1-token — トークンの値を外に出さない', async () => {
+  const { tokenShape } = await import('../../../scripts/check-d1-token.mjs');
+  const secret = `cfat_${'S'.repeat(48)}`;
+  const shape = tokenShape(secret);
+  // **長さと種類だけ。** 値も先頭数文字も返さない。
+  assert.equal(shape.length, 53);
+  assert.match(shape.kind, /アカウント/);
+  assert.ok(!JSON.stringify(shape).includes('SSSS'), 'トークンの中身が漏れている');
+
+  assert.match(tokenShape(`cfut_${'x'.repeat(48)}`).kind, /ユーザー API トークン/);
+  assert.match(tokenShape(`cfk_${'x'.repeat(48)}`).kind, /API キー/);
+  assert.match(tokenShape('a'.repeat(37)).kind, /グローバル/);
+  assert.equal(tokenShape('').kind, 'なし');
+});
+
+test('check-d1-token — 測った事実と食い違う案内をしない', async () => {
+  const { verdict } = await import('../../../scripts/check-d1-token.mjs');
+  const ok = { status: 200, code: '' };
+  const ng = { status: 403, code: '10000: Authentication error' };
+
+  // 3 つとも通る → 権限の問題ではない。「D1:Edit を足せ」と言わない。
+  const fine = verdict({ list: ok, query: ok, importInit: ok });
+  assert.equal(fine.ok, true);
+  assert.ok(!/編集/.test(fine.text), '通っているのに権限を足させようとしている');
+
+  // どれも通らない → D1 の権限が無い
+  const none = verdict({ list: ng, query: ng, importInit: ng });
+  assert.equal(none.ok, false);
+  assert.match(none.text, /D1 の権限が入っていない/);
+
+  // 問い合わせは通るのに取り込みだけ落ちる → 権限とトークンの種類の 2 択
+  const importOnly = verdict({ list: ok, query: ok, importInit: ng });
+  assert.equal(importOnly.ok, false);
+  assert.match(importOnly.text, /取り込みだけ弾かれている/);
+  assert.match(importOnly.text, /cfut_/, 'トークンの種類の線が案内に無い');
+
+  // 読めるだけ → 編集を足す
+  const readOnly = verdict({ list: ok, query: ng, importInit: ng });
+  assert.match(readOnly.text, /読み取りだけ/);
+});
+
+test('check-d1-token — 取り込みの確認でデータベースを変えない', () => {
+  // init しか送らない。SQL を送る段には進まない。
+  const src = readFileSync(
+    fileURLToPath(new URL('../../../scripts/check-d1-token.mjs', import.meta.url)),
+    'utf8',
+  );
+  assert.match(src, /action: 'init'/);
+  for (const bad of ['ingest', 'DELETE', 'DROP', 'INSERT']) {
+    assert.ok(!src.includes(bad), `確認のつもりで ${bad} を送っている`);
+  }
+});
+
+test('D1 へ流し込む workflow は、落ちたら権限を測る', () => {
+  // 失敗したときに wrangler のメッセージだけが残ると、原因が分からないまま
+  // 当てずっぽうの往復になる（実際になった）。
+  const dir = fileURLToPath(new URL('../../../.github/workflows', import.meta.url));
+  for (const name of ['earnings.yml', 'quotes.yml', 'backfill.yml']) {
+    const text = readFileSync(join(dir, name), 'utf8');
+    assert.ok(text.includes('d1 execute'), `${name} が D1 に流していない`);
+    assert.ok(
+      text.includes('scripts/check-d1-token.mjs'),
+      `${name} が落ちたときに権限を測っていない`,
+    );
+    assert.ok(text.includes('if: failure()'), `${name} の確認が失敗時に走らない`);
+  }
+});
+
+test('check-d1-token — 届かなかっただけのときにトークンを疑わせない', async () => {
+  // **スモークテストで見つけた自分のバグ。** 回線がこけて返事が
+  // 来なかっただけなのに「権限が入っていない」と断定していた。
+  // 誤診を無くすために足した仕組みが、誤診の出どころになっていた。
+  const { verdict } = await import('../../../scripts/check-d1-token.mjs');
+  const unreachable = { status: 0, code: '到達できない: fetch failed' };
+  const v = verdict({ list: unreachable, query: unreachable, importInit: unreachable });
+  assert.equal(v.ok, false);
+  assert.match(v.text, /届いていない/);
+  assert.ok(!/権限が入っていない/.test(v.text), '届かないのを権限のせいにしている');
+  assert.ok(!/編集/.test(v.text), 'トークンをいじらせようとしている');
+});
