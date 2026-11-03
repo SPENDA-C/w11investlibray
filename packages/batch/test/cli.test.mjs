@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, keyHint, parseParams, Finnhub, finnhubHint, rowsOf, parseRows, parseSheetTimestamp, isStale, assembleSheetSync, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
+import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, keyHint, parseParams, Finnhub, finnhubHint, rowsOf, parseEarnings, toSession, tallyHours, assembleEarnings, parseRows, parseSheetTimestamp, isStale, assembleSheetSync, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
 
 test('引数の解析 — 値ありとフラグのみを区別する', () => {
   const a = parseArgs(['backfill', '--from', '2026-01-01', '--to', '2026-02-01', '--verbose']);
@@ -455,6 +455,122 @@ test('finnhubHint — 状態コードごとに次の一手を出す', () => {
   assert.equal(finnhubHint(200, { ok: true }), '');
   // キーの置き場所は 2 箇所（手元と Actions）。Cloudflare は関係ない。
   assert.doesNotMatch(finnhubHint(401, {}), /Cloudflare/);
+});
+
+test('finnhubHint — 「アクセス権が無い」はキーではなくプランの話', () => {
+  // **実際に出た形**（2026-11-03、日本株 7203.T）。
+  // キーは正しいのに「入れ直せ」と案内していた。J-Quants の契約切れで
+  // 同じ誤案内をしたので、同じ直し方をする。
+  const hint = finnhubHint(403, { error: "You don't have access to this resource." });
+  assert.match(hint, /契約プランの範囲外/);
+  assert.doesNotMatch(hint, /FINNHUB_API_KEY/, 'キーの置き場所を案内してしまっている');
+  assert.doesNotMatch(hint, /入れ直/);
+});
+
+// ---- 決算カレンダーの取り込み --------------------------------------------------
+//
+// **実測（2026-11-03）の形をそのまま使う。** check-finnhub が返したのは:
+//   symbol, date, hour, quarter, year, epsEstimate, epsActual,
+//   revenueEstimate, revenueActual
+// 1 件目: {"symbol":"AI","date":"2026-12-03","hour":"","quarter":2,"year":2027,…}
+
+/** 実測の 1 件目をそのまま。**作り話の形でテストしない。** */
+const REAL_ROW = {
+  symbol: 'AI',
+  date: '2026-12-03',
+  hour: '',
+  quarter: 2,
+  year: 2027,
+  epsEstimate: -0.2195,
+  epsActual: null,
+  revenueEstimate: 54668280,
+  revenueActual: null,
+};
+
+test('parseEarnings — 実測の 1 件目がそのまま通る', () => {
+  const { ok, skipped } = parseEarnings([REAL_ROW]);
+  assert.equal(skipped.length, 0);
+  assert.deepEqual(ok, [
+    {
+      symbolId: 'US.AI',
+      code: 'AI',
+      announceDate: '2026-12-03',
+      session: null,
+      fiscalPeriod: '2027Q2',
+    },
+  ]);
+});
+
+test('toSession — 見ていない綴りを「引け後」と決めつけない', () => {
+  // bmo / amc / dmh は Finnhub が使うとされている値だが、実測では
+  // 空文字しか見ていない。知らない綴りを埋めると画面に嘘が出る。
+  assert.equal(toSession('bmo'), 'before');
+  assert.equal(toSession('amc'), 'after');
+  assert.equal(toSession('dmh'), 'during');
+  assert.equal(toSession(''), null);
+  assert.equal(toSession('なにか'), null);
+  assert.equal(toSession(null), null);
+  assert.equal(toSession(undefined), null);
+});
+
+test('tallyHours — 未知の綴りに気付けるよう数える', () => {
+  const t = tallyHours([{ hour: '' }, { hour: 'amc' }, { hour: 'amc' }, { hour: 'xx' }, {}]);
+  assert.equal(t.get('(空)'), 1);
+  assert.equal(t.get('amc'), 2);
+  assert.equal(t.get('xx'), 1);
+  assert.equal(t.get('(文字列でない)'), 1);
+});
+
+test('parseEarnings — 読めない行は落とす。日付をでっち上げない', () => {
+  const { ok, skipped } = parseEarnings([
+    REAL_ROW,
+    { symbol: 'X', date: '' },
+    { symbol: 'Y', date: '2026/12/03' },
+    { symbol: '', date: '2026-12-03' },
+    { symbol: 'A B', date: '2026-12-03' },
+  ]);
+  assert.equal(ok.length, 1, '読めない行を通している');
+  assert.equal(skipped.length, 4);
+  assert.match(skipped[1].why, /date の形/);
+});
+
+test('assembleEarnings — symbols が earnings_calendar より先に来る', () => {
+  const { ok } = parseEarnings([REAL_ROW]);
+  const sql = assembleEarnings({
+    rows: ok, market: 'US', from: '2026-11-03', to: '2026-12-03',
+    now: '2026-11-03T00:00:00.000Z',
+  }).join('\n');
+  const s = sql.indexOf('INSERT INTO symbols');
+  const e = sql.indexOf('INSERT INTO earnings_calendar');
+  assert.ok(s >= 0 && e >= 0);
+  assert.ok(s < e, `symbols が先に来ていない: ${s} / ${e}`);
+});
+
+test('assembleEarnings — 生成した SQL が実スキーマにそのまま通る', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { ok } = parseEarnings([
+    REAL_ROW,
+    { symbol: 'NVDA', date: '2026-11-19', hour: 'amc', quarter: 3, year: 2027 },
+    // 同じ銘柄・同じ日が 2 度来ても主キーで衝突しない
+    { symbol: 'NVDA', date: '2026-11-19', hour: 'amc', quarter: 3, year: 2027 },
+  ]);
+  const sql = assembleEarnings({
+    rows: ok, market: 'US', from: '2026-11-03', to: '2026-12-03',
+    now: '2026-11-03T00:00:00.000Z',
+  }).join('\n');
+
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON;');
+  db.exec(await readFile(new URL('../../../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  db.exec(await readFile(new URL('../../../migrations/0004_earnings.sql', import.meta.url), 'utf8'));
+  // **symbols を手で入れない。** 生成物だけで通ることを見る。
+  db.exec(sql);
+
+  const rows = db
+    .prepare('SELECT symbol_id, announce_date, session, fiscal_period FROM earnings_calendar ORDER BY symbol_id')
+    .all()
+    .map((r) => `${r.symbol_id} ${r.announce_date} ${r.session ?? '-'} ${r.fiscal_period ?? '-'}`);
+  assert.deepEqual(rows, ['US.AI 2026-12-03 - 2027Q2', 'US.NVDA 2026-11-19 after 2027Q3']);
 });
 
 // ---- シート取り込み ----------------------------------------------------------

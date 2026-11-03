@@ -23,7 +23,8 @@
     "check:sheet": "npm run check:sheet -w @invest/batch --",
     "sheet": "npm run sheet -w @invest/batch --",
     "check:finnhub": "npm run check:finnhub -w @invest/batch --",
-    "set:access": "node scripts/set-access.mjs"
+    "set:access": "node scripts/set-access.mjs",
+    "earnings": "npm run earnings -w @invest/batch --"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260825.1",

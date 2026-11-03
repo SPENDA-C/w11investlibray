@@ -67,6 +67,16 @@ export class Finnhub {
 export function finnhubHint(status: number, body: unknown): string {
   const text = typeof body === 'string' ? body : JSON.stringify(body ?? '');
 
+  // **403 は 2 種類ある。本文で分ける。**
+  // 「アクセス権が無い」はプランの話で、キーは正しい。ここを
+  // キーの問題として案内すると、正しいキーを持っている人に
+  // 「入れ直せ」と言うことになる（J-Quants の契約切れで同じ誤案内をした）。
+  if (status === 403 && /access to this resource|premium|upgrade/i.test(text)) {
+    return `  → **契約プランの範囲外。** キーは正しい。
+     無料枠は対象が限られる（米国株のみなど）。
+     finnhub.io の料金ページで、この経路と銘柄が含まれるか確認する。
+     **別の銘柄なら通ることがある**ので、範囲を見極めてから決める。`;
+  }
   if (status === 401 || status === 403) {
     return `  → キーが効いていない。**このプロセスが読んだのは環境変数 FINNHUB_API_KEY。**
      キーは独立したコピーが 2 箇所にある:
