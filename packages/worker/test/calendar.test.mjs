@@ -165,6 +165,48 @@ test('データがある市場だけカレンダーが出る', async () => {
   assert.ok(!html.includes('id="cal-us"'), '米国株は空なのに出ている');
 });
 
+test('実際の量（1 か月 500 件超）で、件数を切り捨てずに出す', async () => {
+  // **実測で 1 か月 510 件あった。** 上限を 400 にしていたせいで
+  // 「400 件」と表示し、さらに ORDER BY announce_date のせいで
+  // **月末の数日が丸ごと消えていた。** 切り捨てた数を事実として
+  // 出すのが、このプロジェクトで一番やらないこと。
+  const env = makeEnv(HOSTS);
+  for (let d = 1; d <= 30; d += 1) {
+    const date = `2026-11-${String(d).padStart(2, '0')}`;
+    for (let i = 0; i < 17; i += 1) {
+      await seed(env, `US.T${d}X${i}`, 'US', `T${d}X${i}`, `銘柄${d}-${i}`, date);
+    }
+  }
+  const html = await (
+    await handler.fetch(req('https://invest.example/?cal-us=2026-11'), env, ctx)
+  ).text();
+
+  assert.match(html, /発表予定 510 件/, '切り捨てた数を出している');
+  assert.ok(!/発表予定 400 件/.test(html));
+  // 月末も残っていること（消えるのは件数だけではない）
+  assert.match(html, /T30X0/, '月末の銘柄が落ちている');
+});
+
+test('上限に達したら、件数を断定しない', async () => {
+  const { calendarSection } = await import('../.build/worker.mjs');
+  const entries = Array.from({ length: 3 }, (_, i) => ({
+    symbolId: `US.X${i}`, code: `X${i}`, name: `X${i}`,
+    announceDate: '2026-11-05', session: null,
+  }));
+  const capped = calendarSection({
+    title: 'x', year: 2026, month: 11, entries,
+    basePath: '', anchor: 'cal-us', emptyNote: '', truncated: true,
+  });
+  assert.match(capped, /3 件以上/, '上限に達したのに件数を断定している');
+
+  const normal = calendarSection({
+    title: 'x', year: 2026, month: 11, entries,
+    basePath: '', anchor: 'cal-us', emptyNote: '', truncated: false,
+  });
+  assert.match(normal, /3 件。/);
+  assert.ok(!/件以上/.test(normal));
+});
+
 test('当月が空でも、データがあれば枠は残す（翌月に送れるように）', async () => {
   const env = makeEnv(HOSTS);
   await seed(env, 'JP.72030', 'JP', '7203', 'トヨタ自動車', '2026-12-05');

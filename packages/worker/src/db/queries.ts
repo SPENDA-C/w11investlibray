@@ -641,11 +641,23 @@ export interface EarningsRow {
  * 同じ銘柄が複数の取得元から入ることがある（主キーに source が入っている）。
  * **カレンダーには 1 銘柄 1 行で出す**ので、ここで畳む。
  */
+/**
+ * 1 か月ぶんの上限。
+ *
+ * **実測で 1 か月 500 件を超える**（Finnhub の米国株は 90 日で 1,500 件）。
+ * 最初 400 にしていて、510 件の月を「400 件」と表示し、しかも
+ * `ORDER BY announce_date` のせいで**月末の数日が丸ごと消えていた。**
+ * 切り捨てた数を事実として出すのが、このプロジェクトで一番やらないこと。
+ *
+ * 余裕を持たせたうえで、**上限に達したら画面でそう言う**（切り捨てを隠さない）。
+ */
+export const MONTH_ROW_CAP = 2000;
+
 export async function earningsForMonth(
   db: D1Database,
   market: string,
   month: string,
-  limit = 400,
+  limit = MONTH_ROW_CAP,
 ): Promise<EarningsRow[]> {
   const res = await db
     .prepare(

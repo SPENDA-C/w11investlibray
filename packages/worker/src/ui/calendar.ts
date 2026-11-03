@@ -103,6 +103,8 @@ export function calendarSection(o: {
   readonly anchor: string;
   /** 取り込みが無いときに出す一言。 */
   readonly emptyNote: string;
+  /** 読み込みが上限に達したか。**件数を断定しないため。** */
+  readonly truncated?: boolean;
 }): string {
   const cells = monthGrid(o.year, o.month, o.entries);
   const prev = shiftMonth(o.year, o.month, -1);
@@ -152,7 +154,11 @@ export function calendarSection(o: {
       total === 0
         ? `<p class="cal-empty">${escapeHtml(o.emptyNote)}</p>`
         : `<div class="cal-grid">${head}${body}</div>
-    <p class="cal-note">この月の発表予定 ${total} 件。<strong>予定は変更されることがあります。</strong>確定情報は各社の開示をご確認ください。</p>`
+    <p class="cal-note">${
+      o.truncated === true
+        ? `この月の発表予定 ${total} 件以上（表示できる上限に達しています）。`
+        : `この月の発表予定 ${total} 件。`
+    }<strong>予定は変更されることがあります。</strong>確定情報は各社の開示をご確認ください。</p>`
     }
   </div>
 </section>`;

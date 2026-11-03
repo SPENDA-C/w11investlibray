@@ -1,7 +1,7 @@
 import type { Env } from '../types.js';
 import { lpPage } from '../ui/lp.js';
 import { parseMonth, formatMonth, calendarSection, type EarningsEntry } from '../ui/calendar.js';
-import { earningsForMonth, hasEarnings } from '../db/queries.js';
+import { earningsForMonth, hasEarnings, MONTH_ROW_CAP } from '../db/queries.js';
 import { appUrl, lpBasePath, lpUrl } from '../site.js';
 import { handleWaitlist } from './waitlist.js';
 import { handleHealth } from './api.js';
@@ -24,6 +24,8 @@ export interface CalendarData {
    * 当月が空なだけなら枠は出す（翌月に送れないと困る）。
    */
   readonly any: boolean;
+  /** 上限に達したか。**切り捨てた数を本当の件数として出さないため。** */
+  readonly truncated: boolean;
 }
 
 /**
@@ -50,6 +52,7 @@ export async function earningsCalendars(
       year,
       month,
       any,
+      truncated: rows.length >= MONTH_ROW_CAP,
       entries: rows.map((r) => ({
         symbolId: r.symbol_id,
         code: r.code,
@@ -75,7 +78,7 @@ export function renderCalendars(
   // 並べても何も伝わらない。取り込みが始まれば自動的に現れる。
   const one = (d: CalendarData, title: string, anchor: string) =>
     d.any
-      ? calendarSection({ title, ...d, basePath, anchor, emptyNote: EMPTY_NOTE })
+      ? calendarSection({ title, ...d, basePath, anchor, emptyNote: EMPTY_NOTE, truncated: d.truncated })
       : '';
   return {
     jp: one(data.jp, '日本株 決算発表カレンダー', 'cal-jp'),
