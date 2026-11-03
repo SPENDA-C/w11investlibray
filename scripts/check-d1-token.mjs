@@ -84,7 +84,7 @@ export function tokenPageUrl(kind, accountId = '') {
  * **測った事実の外に出ない。** 分からないときは分からないと言う。
  */
 export function verdict({
-  list, query, importInit, verify, workers, tokenUrl = tokenPageUrl(''),
+  list, query, importInit, verify, workers, tokenKind = '', tokenUrl = tokenPageUrl(''),
 }) {
   const ok = (r) => r !== undefined && r.status >= 200 && r.status < 300;
 
@@ -114,26 +114,47 @@ export function verdict({
   // 「トークンは有効で、このアカウントのものだ」が確定する。
   if (!ok(list) && !ok(query) && !ok(importInit) && (ok(verify) || ok(workers))) {
     const id = verify?.tokenId;
+    const accountOwned = tokenKind.includes('アカウント API トークン');
+
+    // **「D1 が全滅」だけでは権限不足と断定できない。**
+    // トークンの種類が D1 に通らない場合も、まったく同じ形で全滅する。
+    // 最初それを権限不足と決めつけて、一往復無駄にした。
+    const kindCause = `**アカウント所有トークン（cfat_）が D1 に通らない。**
+          Cloudflare は「すべての機能が *いずれ* アカウント所有トークンに
+          対応する」と書いていて、**未対応のサービスがあることを認めている。**
+          D1 の権限を足しても返りが 1 文字も変わらないなら、これが疑わしい。
+          → **ユーザー API トークン（cfut_）を作って、Secret を差し替える。**
+             https://dash.cloudflare.com/profile/api-tokens
+             権限: アカウント / D1 / 編集
+                   アカウント / Workers スクリプト / 編集（デプロイ用）
+             これで通れば原因が確定する。通らなければ別の線。`;
+
+    const secretCause = `**GitHub の Secret が、編集したトークンと別物。**
+          いま Actions が使っているトークンの ID は
+            ${id === undefined ? '(取れなかった)' : id}
+          ダッシュボードのトークン一覧の ID と見比べる。
+          **デプロイは通るので、古いトークンでも気付けない。**`;
+
+    const saveCause = `画面で保存まで進んでいない。チェックを入れただけで
+          「続ける」「保存」まで行かないと反映されない。保存後の一覧で、
+          そのトークンの権限欄に D1 が出るか見る。`;
+
+    const causes = accountOwned
+      ? [kindCause, secretCause, saveCause]
+      : [secretCause, saveCause];
+
     return {
       ok: false,
       text: `**トークンもアカウント ID も効いている**（${
         ok(verify) ? 'トークンの自己確認' : 'Workers の一覧'
-      }は通った）。**D1 だけが通らない。**
+      }は通った）。**D1 だけが全部落ちている。**
 
-     権限を足したのに変わらないなら、理由は次のどちらか。上から確かめる。
+     D1 の権限を足しても返りが変わらないなら、「権限が足りない」では
+     説明が付かない。考えられるのは次の ${causes.length} つ。上から確かめる。
 
-       1. **GitHub の Secret が、編集したトークンと別物。**
-          いま Actions が使っているトークンの ID は
-            ${id === undefined ? '(取れなかった)' : id}
-          これをダッシュボードのトークン一覧の ID と見比べる。
-          違っていれば、編集したのは別のトークン。
-          **デプロイは通るので、古いトークンでも気付けない。**
+${causes.map((c, i) => `       ${i + 1}. ${c}`).join('\n\n')}
 
-       2. 画面で保存できていない。チェックを入れただけで
-          「続ける」「保存」まで進んでいないと反映されない。
-          保存後の一覧で、そのトークンの権限に D1 が出るか見る。
-
-     ${tokenUrl}`,
+     トークンの編集: ${tokenUrl}`,
     };
   }
 
@@ -293,7 +314,11 @@ async function main() {
     );
   }
 
-  const v = verdict({ ...results, tokenUrl: tokenPageUrl(shape.kind, accountId) });
+  const v = verdict({
+    ...results,
+    tokenKind: shape.kind,
+    tokenUrl: tokenPageUrl(shape.kind, accountId),
+  });
   console.log(`\n${v.ok ? '→' : '→'} ${v.text}\n`);
   process.exitCode = v.ok ? 0 : 1;
 }

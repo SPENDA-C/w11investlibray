@@ -587,7 +587,7 @@ test('check-d1-token — D1 だけ落ちるときにトークンの取り違え�
     tokenUrl: 'https://dash.cloudflare.com/x/api-tokens',
   });
   assert.equal(v.ok, false);
-  assert.match(v.text, /D1 だけが通らない/);
+  assert.match(v.text, /D1 だけが全部落ちている/);
   assert.match(v.text, /tok-abc/, 'どのトークンか突き合わせられない');
   assert.match(v.text, /保存/, '保存漏れの線が案内に無い');
 
@@ -598,4 +598,33 @@ test('check-d1-token — D1 だけ落ちるときにトークンの取り違え�
   });
   assert.ok(!/別物/.test(all.text), '確認できていないのに取り違えだと言っている');
   assert.match(all.text, /D1 の権限が入っていない/);
+});
+
+test('check-d1-token — D1 の全滅を権限不足と決めつけない', async () => {
+  // **自分の論理の誤り。** 「D1 の 3 経路すべてが落ちる ⇒ 権限が無い」と
+  // 断定したが、**トークンの種類が D1 に対応していない場合も同じ形で全滅する。**
+  // 見分けの付かない signature を片方だと決めつけて、一往復無駄にした。
+  const { verdict, tokenShape } = await import('../../../scripts/check-d1-token.mjs');
+  const ng = { status: 401, code: '10000: Authentication error' };
+  const base = {
+    verify: { status: 200, code: '', tokenId: 'tok-abc', tokenStatus: 'active' },
+    workers: { status: 200, code: '' },
+    list: ng, query: ng, importInit: ng,
+    tokenUrl: 'https://dash.cloudflare.com/x/api-tokens',
+  };
+
+  // アカウント所有（cfat_）なら、種類の線を**最初に**出す
+  const acct = verdict({ ...base, tokenKind: tokenShape(`cfat_${'x'.repeat(48)}`).kind });
+  assert.match(acct.text, /アカウント所有トークン（cfat_）が D1 に通らない/);
+  assert.match(acct.text, /cfut_/, 'ユーザートークンで切り分ける案内が無い');
+  assert.ok(
+    acct.text.indexOf('cfat_）が D1 に通らない') < acct.text.indexOf('Secret が、編集した'),
+    '一番疑わしい線が後ろに回っている',
+  );
+  assert.ok(!/権限が入っていない/.test(acct.text), 'まだ権限不足と断定している');
+
+  // ユーザー所有（cfut_）なら、その線は出さない（作り直す先が同じになる）
+  const user = verdict({ ...base, tokenKind: tokenShape(`cfut_${'x'.repeat(48)}`).kind });
+  assert.ok(!/cfat_）が D1 に通らない/.test(user.text), '関係ない線を出している');
+  assert.match(user.text, /Secret が、編集した/);
 });
