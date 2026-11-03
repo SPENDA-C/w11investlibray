@@ -63,11 +63,27 @@ export function tokenShape(token) {
 }
 
 /**
+ * トークンを編集する画面の URL。**種類で場所が違う。**
+ *
+ * アカウント所有のトークン（`cfat_`）は、**プロフィール側の一覧に出てこない。**
+ * 実際にこれで外した案内をして、探させてしまった。wrangler も
+ * アカウント側の URL を出している（`dash.cloudflare.com/{account}/api-tokens`）。
+ */
+export function tokenPageUrl(kind, accountId = '') {
+  if (typeof kind === 'string' && kind.includes('アカウント API トークン')) {
+    return accountId === ''
+      ? 'https://dash.cloudflare.com/ → 対象のアカウント → 管理 → アカウント API トークン'
+      : `https://dash.cloudflare.com/${accountId}/api-tokens`;
+  }
+  return 'https://dash.cloudflare.com/profile/api-tokens';
+}
+
+/**
  * 3 つの結果から、次にやることを 1 つに決める。
  *
  * **測った事実の外に出ない。** 分からないときは分からないと言う。
  */
-export function verdict({ list, query, importInit }) {
+export function verdict({ list, query, importInit, tokenUrl = tokenPageUrl('') }) {
   const ok = (r) => r.status >= 200 && r.status < 300;
 
   // **届かなかったことを「権限が無い」と言わない。** status 0 は
@@ -95,9 +111,13 @@ export function verdict({ list, query, importInit }) {
     return {
       ok: false,
       text: `**D1 をまったく触れていない**（一覧も問い合わせも通らない）。
-     トークンに D1 の権限が入っていない。
-     https://dash.cloudflare.com/profile/api-tokens でこのトークンを編集し、
-     **アカウント → D1 → 編集** を足す。`,
+     トークンに D1 の権限が入っていない。デプロイが通るのは
+     Workers の権限だけで足りるため。
+
+     ${tokenUrl}
+     → このトークンの編集 → アクセス許可に 1 行足す:
+         アカウント  /  D1  /  編集
+     → 続ける → 保存。**値は変わらないので、Secret の貼り直しは要らない。**`,
     };
   }
 
@@ -109,10 +129,11 @@ export function verdict({ list, query, importInit }) {
      試す順に 2 つ:
        1. トークンに **アカウント → D1 → 編集** が入っているか見る
           （読み取りだけだと問い合わせが通って取り込みが落ちる）
+          場所: ${tokenUrl}
        2. それでも同じなら、**ユーザー API トークン（cfut_）を作り直す。**
           アカウント API トークン（cfat_）が import で弾かれた報告がある。
           作る場所: https://dash.cloudflare.com/profile/api-tokens
-          （「アカウント所有」ではなく、自分のプロフィール側で作る）`,
+          （アカウント所有ではなく、自分のプロフィール側で作る）`,
     };
   }
 
@@ -120,7 +141,7 @@ export function verdict({ list, query, importInit }) {
     ok: false,
     text: `一覧は通ったが、問い合わせと取り込みが通らない。
      トークンが **読み取りだけ**の可能性が高い。
-     **アカウント → D1 → 編集** を足す。`,
+     ${tokenUrl} で **アカウント / D1 / 編集** を足す。`,
   };
 }
 
@@ -190,7 +211,7 @@ async function main() {
     console.log(`${mark} ${r.label}  HTTP ${r.status}${r.code === '' ? '' : `  ${r.code}`}`);
   }
 
-  const v = verdict(results);
+  const v = verdict({ ...results, tokenUrl: tokenPageUrl(shape.kind, accountId) });
   console.log(`\n${v.ok ? '→' : '→'} ${v.text}\n`);
   process.exitCode = v.ok ? 0 : 1;
 }

@@ -86,6 +86,41 @@ npm run db:migrate:remote -w @invest/worker   # 0001 と 0002 を順に適用す
 
 ## 4. Secret を登録する
 
+### `CLOUDFLARE_API_TOKEN` に要る権限
+
+**デプロイが通るトークンでも、D1 には流せない。** 別々の権限なので、
+デプロイの成功は D1 が触れることの証拠にならない。
+
+| 権限 | 何に要るか |
+|---|---|
+| アカウント / Workers スクリプト / 編集 | `wrangler deploy` |
+| **アカウント / D1 / 編集** | **`wrangler d1 execute --remote`（バックフィル・現在値・決算カレンダー）** |
+
+**2026-11-03 の実測。** D1 の権限を入れていないトークンで
+`d1 execute --remote --file` を流したときの返り（`npm run check:d1token`）:
+
+```
+✗ 1. 一覧 (D1 の読み)              HTTP 401  10000: Authentication error
+✗ 2. 問い合わせ (--command の経路)  HTTP 403  7403: The given account is not valid
+                                             or is not authorized to access this service
+✗ 3. 取り込み (--file の経路)      HTTP 401  10000: Authentication error
+```
+
+wrangler 側は「Authentication error [code: 10000] / 権限を確認してください」
+としか言わないので、**キーの貼り間違いと見分けが付かない。**
+`npm run check:d1token` が 3 経路を測って、次にやることを 1 つに絞る。
+D1 に流す workflow は、落ちたとき自動でこれを走らせる。
+
+**トークンを編集する画面は種類で違う。**
+アカウント API トークン（`cfat_`）は**プロフィール側の一覧に出てこない**:
+
+| トークン | 場所 |
+|---|---|
+| `cfat_`（アカウント所有） | `https://dash.cloudflare.com/<アカウント ID>/api-tokens` |
+| `cfut_`（ユーザー所有） | `https://dash.cloudflare.com/profile/api-tokens` |
+
+権限を足しても**トークンの値は変わらない**ので、GitHub の Secret は貼り直さなくてよい。
+
 **`wrangler.toml` に API キーを書かないこと。**
 
 ```bash

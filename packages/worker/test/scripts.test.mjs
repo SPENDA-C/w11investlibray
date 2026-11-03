@@ -508,3 +508,29 @@ test('check-d1-token — 届かなかっただけのときにトークンを疑�
   assert.ok(!/権限が入っていない/.test(v.text), '届かないのを権限のせいにしている');
   assert.ok(!/編集/.test(v.text), 'トークンをいじらせようとしている');
 });
+
+test('check-d1-token — トークンを編集する画面を種類で出し分ける', async () => {
+  // **実際に外した案内。** アカウント所有のトークン（cfat_）は
+  // プロフィール側の一覧に出てこないので、profile/api-tokens を案内すると
+  // 「そのトークンが無い」と探させることになる。
+  const { tokenPageUrl, tokenShape, verdict } = await import(
+    '../../../scripts/check-d1-token.mjs'
+  );
+  const acct = 'a'.repeat(32);
+
+  const forAccount = tokenPageUrl(tokenShape(`cfat_${'x'.repeat(48)}`).kind, acct);
+  assert.equal(forAccount, `https://dash.cloudflare.com/${acct}/api-tokens`);
+  assert.ok(!forAccount.includes('/profile/'), 'アカウント所有をプロフィール側に案内している');
+
+  const forUser = tokenPageUrl(tokenShape(`cfut_${'x'.repeat(48)}`).kind, acct);
+  assert.equal(forUser, 'https://dash.cloudflare.com/profile/api-tokens');
+
+  // アカウント ID が無ければ URL をでっち上げない
+  assert.ok(!tokenPageUrl('アカウント API トークン (cfat_)', '').startsWith('https://dash.cloudflare.com/a'));
+
+  // 実測と同じ形（3 つとも落ちる）で、正しい画面を案内すること
+  const ng = { status: 401, code: '10000: Authentication error' };
+  const v = verdict({ list: ng, query: ng, importInit: ng, tokenUrl: forAccount });
+  assert.ok(v.text.includes(forAccount), '案内に編集先が入っていない');
+  assert.ok(!v.text.includes('/profile/'), 'プロフィール側を案内している');
+});
