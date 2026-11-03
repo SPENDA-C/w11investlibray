@@ -1,0 +1,64 @@
+name: Finnhub の確認
+
+# Finnhub が実際に何を返すかを見る。**手で実行するだけ。**
+#
+# **なぜ Actions で回せるようにしたか。** キーは既にここの Secret にある。
+# 手元のシェルに export し直させると、キーの置き場所が 1 つ増えるうえ、
+# 「どのターミナルで打ったか」で毎回つまずく。押せば結果が出る形にする。
+#
+# 出力に載るのは決算予定の項目名と 1 件目だけ。**キーは出さない。**
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: '開始日 (YYYY-MM-DD)。空なら今日'
+        default: ''
+      to:
+        description: '終了日 (YYYY-MM-DD)。空なら 30 日後'
+        default: ''
+      jp_symbol:
+        description: '日本株が取れるか試す銘柄'
+        default: '7203.T'
+      path:
+        description: '経路の候補（カンマ区切り）。空なら /calendar/earnings'
+        default: ''
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Secret が登録されているか
+        env:
+          KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::FINNHUB_API_KEY が未登録"
+            echo "Settings → Secrets and variables → Actions で登録する。"
+            echo "キーは finnhub.io のダッシュボードで取れる。"
+            exit 1
+          fi
+          echo "FINNHUB_API_KEY は登録済み（${#KEY} 文字）"
+
+      # **npm を挟まず node を直接呼ぶ。** `npm run X -- args` の args は
+      # script 文字列の末尾に連結されるので、入れ子だと内側の npm が
+      # フラグを自分のオプションとして食う（実際それで落ちた）。
+      - name: 何が返るかを見る
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: |
+          npm run build -w @invest/batch --silent
+          args=""
+          [ -n "${{ inputs.from }}" ]      && args="$args --from ${{ inputs.from }}"
+          [ -n "${{ inputs.to }}" ]        && args="$args --to ${{ inputs.to }}"
+          [ -n "${{ inputs.jp_symbol }}" ] && args="$args --jp-symbol ${{ inputs.jp_symbol }}"
+          [ -n "${{ inputs.path }}" ]      && args="$args --path ${{ inputs.path }}"
+          node packages/batch/.build/cli.mjs check-finnhub $args
