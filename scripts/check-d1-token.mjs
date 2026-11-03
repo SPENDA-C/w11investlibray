@@ -83,8 +83,10 @@ export function tokenPageUrl(kind, accountId = '') {
  *
  * **測った事実の外に出ない。** 分からないときは分からないと言う。
  */
-export function verdict({ list, query, importInit, tokenUrl = tokenPageUrl('') }) {
-  const ok = (r) => r.status >= 200 && r.status < 300;
+export function verdict({
+  list, query, importInit, verify, workers, tokenUrl = tokenPageUrl(''),
+}) {
+  const ok = (r) => r !== undefined && r.status >= 200 && r.status < 300;
 
   // **届かなかったことを「権限が無い」と言わない。** status 0 は
   // 返事が来なかったという意味しかない。ここを混ぜると、回線が
@@ -104,6 +106,34 @@ export function verdict({ list, query, importInit, tokenUrl = tokenPageUrl('') }
       text: `取り込みの経路まで通った。**トークンの権限は足りている。**
      さっきの失敗が続くなら、原因は権限ではない。もう一度流して、
      違うメッセージが出ないか見る。`,
+    };
+  }
+
+  // **D1 だけが通らないのか、トークン全体が効いていないのかを分ける。**
+  // トークンの自己確認（verify）は権限が要らないので、これが通れば
+  // 「トークンは有効で、このアカウントのものだ」が確定する。
+  if (!ok(list) && !ok(query) && !ok(importInit) && (ok(verify) || ok(workers))) {
+    const id = verify?.tokenId;
+    return {
+      ok: false,
+      text: `**トークンもアカウント ID も効いている**（${
+        ok(verify) ? 'トークンの自己確認' : 'Workers の一覧'
+      }は通った）。**D1 だけが通らない。**
+
+     権限を足したのに変わらないなら、理由は次のどちらか。上から確かめる。
+
+       1. **GitHub の Secret が、編集したトークンと別物。**
+          いま Actions が使っているトークンの ID は
+            ${id === undefined ? '(取れなかった)' : id}
+          これをダッシュボードのトークン一覧の ID と見比べる。
+          違っていれば、編集したのは別のトークン。
+          **デプロイは通るので、古いトークンでも気付けない。**
+
+       2. 画面で保存できていない。チェックを入れただけで
+          「続ける」「保存」まで進んでいないと反映されない。
+          保存後の一覧で、そのトークンの権限に D1 が出るか見る。
+
+     ${tokenUrl}`,
     };
   }
 
@@ -154,21 +184,60 @@ async function probe(fetchImpl, label, url, init) {
   try {
     const res = await fetchImpl(url, init);
     let code = '';
+    let extra = {};
     try {
       const body = await res.json();
       code = (body?.errors ?? []).map((e) => `${e.code}: ${e.message}`).join(' / ');
+      // verify の返り。**トークンの値ではない**（ダッシュボードにも出る識別子）。
+      if (typeof body?.result?.id === 'string') {
+        extra = { tokenId: body.result.id, tokenStatus: body.result.status ?? '' };
+      }
     } catch {
       code = '(本文が JSON でない)';
     }
-    return { label, status: res.status, code };
+    return { label, status: res.status, code, extra };
   } catch (err) {
     return { label, status: 0, code: `到達できない: ${err.message}` };
   }
 }
 
+/**
+ * トークン自身の確認。**権限が要らないので、通れば「トークンは有効で、
+ * このアカウントのものだ」が確定する。** D1 が通らないのと切り分けられる。
+ *
+ * **経路が 2 つある。** アカウント所有（`cfat_`）は
+ * `/accounts/{id}/tokens/verify`、ユーザー所有（`cfut_`）は
+ * `/user/tokens/verify`。**どちらかを決めつけず、両方試す。**
+ * （アカウント所有を `/user/...` に投げると `1000: Invalid API Token` が返り、
+ * 有効なトークンを無効と誤診する。）
+ *
+ * 返す `tokenId` は**秘密ではない。** ダッシュボードの一覧にも出る識別子で、
+ * 「Actions が使っているのはどのトークンか」を突き合わせるために出す。
+ */
+export async function probeVerify(fetchImpl, accountId, headers) {
+  const paths = [
+    `${API}/accounts/${accountId}/tokens/verify`,
+    `${API}/user/tokens/verify`,
+  ];
+  let last = null;
+  for (const url of paths) {
+    const r = await probe(fetchImpl, '0. トークンの自己確認 (権限不要)', url, { headers });
+    if (r.status >= 200 && r.status < 300) return { ...r, ...r.extra };
+    last = r;
+  }
+  return last ?? { label: '0. トークンの自己確認 (権限不要)', status: 0, code: '' };
+}
+
 export async function run({ token, accountId, databaseId, fetchImpl = fetch }) {
   const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
   const base = `${API}/accounts/${accountId}/d1/database/${databaseId}`;
+
+  const verify = await probeVerify(fetchImpl, accountId, headers);
+  // D1 以外が通るかを見る。アカウント ID が違えばこれも落ちる。
+  const workers = await probe(
+    fetchImpl, '0b. Workers の一覧 (D1 以外)', `${API}/accounts/${accountId}/workers/scripts`,
+    { headers },
+  );
 
   const list = await probe(
     fetchImpl, '1. 一覧 (D1 の読み)', `${API}/accounts/${accountId}/d1/database`, { headers },
@@ -184,7 +253,7 @@ export async function run({ token, accountId, databaseId, fetchImpl = fetch }) {
     headers,
     body: JSON.stringify({ action: 'init', etag: '0'.repeat(32) }),
   });
-  return { list, query, importInit };
+  return { verify, workers, list, query, importInit };
 }
 
 async function main() {
@@ -211,9 +280,17 @@ async function main() {
   }
 
   const results = await run({ token, accountId, databaseId });
-  for (const r of [results.list, results.query, results.importInit]) {
+  for (const r of [results.verify, results.workers, results.list, results.query, results.importInit]) {
     const mark = r.status >= 200 && r.status < 300 ? '✓' : '✗';
     console.log(`${mark} ${r.label}  HTTP ${r.status}${r.code === '' ? '' : `  ${r.code}`}`);
+  }
+  if (results.verify.tokenId !== undefined) {
+    // **秘密ではない。** ダッシュボードの一覧と突き合わせるために出す。
+    console.log(
+      `\n  いま使っているトークンの ID: ${results.verify.tokenId}` +
+        `${results.verify.tokenStatus === '' ? '' : `（状態: ${results.verify.tokenStatus}）`}` +
+        `\n  ダッシュボードのトークン一覧の ID と一致するか見る。`,
+    );
   }
 
   const v = verdict({ ...results, tokenUrl: tokenPageUrl(shape.kind, accountId) });

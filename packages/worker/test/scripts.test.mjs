@@ -534,3 +534,68 @@ test('check-d1-token — トークンを編集する画面を種類で出し分�
   assert.ok(v.text.includes(forAccount), '案内に編集先が入っていない');
   assert.ok(!v.text.includes('/profile/'), 'プロフィール側を案内している');
 });
+
+test('check-d1-token — トークンの自己確認は 2 つの経路を試す', async () => {
+  // **アカウント所有を /user/tokens/verify に投げると 1000: Invalid API Token。**
+  // 有効なトークンを「無効」と誤診するので、経路を決めつけない。
+  const { probeVerify } = await import('../../../scripts/check-d1-token.mjs');
+  const seen = [];
+  const fake = async (url) => {
+    seen.push(url);
+    const accountPath = url.includes('/accounts/');
+    return {
+      status: accountPath ? 200 : 400,
+      json: async () =>
+        accountPath
+          ? { result: { id: 'tok-123', status: 'active' }, errors: [] }
+          : { errors: [{ code: 1000, message: 'Invalid API Token' }] },
+    };
+  };
+  const r = await probeVerify(fake, 'acct', {});
+  assert.equal(r.status, 200);
+  assert.equal(r.tokenId, 'tok-123');
+  assert.equal(seen.length, 1, 'アカウント側で通ったのに user 側も叩いている');
+
+  // 逆順（ユーザー所有）でも拾えること
+  const seen2 = [];
+  const userOnly = async (url) => {
+    seen2.push(url);
+    const accountPath = url.includes('/accounts/');
+    return {
+      status: accountPath ? 400 : 200,
+      json: async () =>
+        accountPath
+          ? { errors: [{ code: 1000, message: 'Invalid API Token' }] }
+          : { result: { id: 'tok-999', status: 'active' }, errors: [] },
+    };
+  };
+  const r2 = await probeVerify(userOnly, 'acct', {});
+  assert.equal(r2.tokenId, 'tok-999');
+  assert.equal(seen2.length, 2, 'もう一方の経路を試していない');
+});
+
+test('check-d1-token — D1 だけ落ちるときにトークンの取り違えを疑わせる', async () => {
+  // 権限を足したのに結果が変わらなかった。**トークンが有効で D1 だけ
+  // 通らないなら、Actions が別のトークンを使っている線が残る。**
+  // デプロイは通るので、古いトークンのままでも気付けない。
+  const { verdict } = await import('../../../scripts/check-d1-token.mjs');
+  const ng = { status: 401, code: '10000: Authentication error' };
+  const v = verdict({
+    verify: { status: 200, code: '', tokenId: 'tok-abc', tokenStatus: 'active' },
+    workers: { status: 200, code: '' },
+    list: ng, query: ng, importInit: ng,
+    tokenUrl: 'https://dash.cloudflare.com/x/api-tokens',
+  });
+  assert.equal(v.ok, false);
+  assert.match(v.text, /D1 だけが通らない/);
+  assert.match(v.text, /tok-abc/, 'どのトークンか突き合わせられない');
+  assert.match(v.text, /保存/, '保存漏れの線が案内に無い');
+
+  // トークンの自己確認まで落ちるなら、取り違えの話はしない
+  const all = verdict({
+    verify: ng, workers: ng, list: ng, query: ng, importInit: ng,
+    tokenUrl: 'https://dash.cloudflare.com/x/api-tokens',
+  });
+  assert.ok(!/別物/.test(all.text), '確認できていないのに取り違えだと言っている');
+  assert.match(all.text, /D1 の権限が入っていない/);
+});
