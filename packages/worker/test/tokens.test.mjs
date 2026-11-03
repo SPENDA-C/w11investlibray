@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { TOKENS, BRAND, FONT_STACK, LP_FONT_STACK, layout, lpPage } from '../.build/worker.mjs';
+import {
+  TOKENS, BRAND, CALENDAR_TOKENS, FONT_STACK, LP_FONT_STACK, layout, lpPage,
+} from '../.build/worker.mjs';
 
 const UI_DIR = fileURLToPath(new URL('../src/ui', import.meta.url));
 
@@ -97,6 +99,72 @@ test('ブランド色を出すのは LP だけ（ダッシュボードは出さ�
   const app = layout({ title: 't', siteName: 's', body: '<p>x</p>' });
   assert.ok(lp.includes('--brand-accent:'), 'LP に BRAND が入っていない');
   assert.ok(!app.includes('--brand-accent:'), 'ダッシュボードに BRAND が入っている');
+});
+
+// ---- 決算カレンダーの色 ------------------------------------------------------
+
+/** 時間帯と曜日の色。tokens.ts の CALENDAR_TOKENS だけが定義する。 */
+const CAL_TOKENS = [
+  '--cal-sun', '--cal-sat', '--cal-sun-bg', '--cal-sat-bg',
+  '--cal-before-bg', '--cal-before-ink',
+  '--cal-after-bg', '--cal-after-ink',
+  '--cal-during-bg', '--cal-during-ink',
+  '--cal-none-bg', '--cal-none-ink',
+];
+
+test('カレンダーの色も tokens.ts だけが定義する', () => {
+  const others = readdirSync(UI_DIR).filter((f) => f.endsWith('.ts') && f !== 'tokens.ts');
+  for (const name of others) {
+    const source = readFileSync(join(UI_DIR, name), 'utf8');
+    for (const token of CAL_TOKENS) {
+      const defines = new RegExp(`${token}\\s*:\\s*[^;\\n)]`).test(source);
+      assert.ok(!defines, `${name} が ${token} を定義している。tokens.ts に寄せること`);
+    }
+  }
+  for (const token of CAL_TOKENS) {
+    assert.ok(CALENDAR_TOKENS.includes(`${token}:`), `${token} が CALENDAR_TOKENS に無い`);
+  }
+});
+
+// ---- 定義していない色を使っていないか ----------------------------------------
+
+/**
+ * **`var(--ground)` のような打ち間違いを落とす。**
+ *
+ * 定義していない変数を参照しても CSS はエラーを出さない。**その箇所が
+ * 透明になるだけ**で、見ている本人が気付かない形で壊れる。実際に
+ * カレンダーの曜日見出しと余白が、定義の無い `--ground` を参照していて
+ * 背景が消えていた。
+ *
+ * 出来上がった HTML だけを見るので、どのページに何を差し込んだかの
+ * 組み合わせ違い（LP にだけ BRAND を入れている等）もまとめて拾える。
+ */
+function undefinedVars(html) {
+  const defined = new Set(
+    [...html.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((m) => m[1]),
+  );
+  const used = new Set([...html.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)].map((m) => m[1]));
+  // `var(--x, 既定値)` と書いてあるものは、無くても困らないので除く。
+  const withFallback = new Set(
+    [...html.matchAll(/var\(\s*(--[a-z0-9-]+)\s*,/gi)].map((m) => m[1]),
+  );
+  return [...used].filter((v) => !defined.has(v) && !withFallback.has(v)).sort();
+}
+
+test('どのページも、定義していない色変数を参照していない', () => {
+  const pages = {
+    LP: lpPage({
+      siteName: 's', shortName: 's', basePath: '', appUrl: '/',
+      calendars: {
+        jp: '', us: '',
+      },
+    }),
+    ダッシュボード: layout({ title: 't', siteName: 's', body: '<p>x</p>' }),
+  };
+  for (const [name, html] of Object.entries(pages)) {
+    const missing = undefinedVars(html);
+    assert.deepEqual(missing, [], `${name} が定義の無い変数を参照している: ${missing.join(', ')}`);
+  }
 });
 
 test('LP の書体は Noto Sans JP が先頭', () => {

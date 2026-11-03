@@ -1,6 +1,6 @@
 import { escapeHtml } from './format.js';
 import { CALENDAR_CSS } from './calendar.js';
-import { BRAND, LP_FONT_STACK, TOKENS } from './tokens.js';
+import { BRAND, CALENDAR_TOKENS, LP_FONT_STACK, TOKENS } from './tokens.js';
 
 /**
  * 先行登録の LP。**市場データを一切出さない公開ページ。**
@@ -82,7 +82,7 @@ export function lpPage(o: LpOptions): string {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&amp;display=swap">
-<style>${TOKENS}${BRAND}${STYLES}${CALENDAR_CSS}</style>
+<style>${TOKENS}${BRAND}${CALENDAR_TOKENS}${STYLES}${CALENDAR_CSS}</style>
 </head>
 <body id="top">
 

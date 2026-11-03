@@ -38,8 +38,9 @@ export async function earningsCalendars(
   env: Env,
   url: URL,
   now = new Date(),
-): Promise<{ jp: CalendarData; us: CalendarData }> {
+): Promise<{ jp: CalendarData; us: CalendarData; today: string }> {
   const current = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 };
+  const today = now.toISOString().slice(0, 10);
 
   const pick = async (anchor: string, market: string): Promise<CalendarData> => {
     const asked = parseMonth(url.searchParams.get(anchor) ?? '');
@@ -63,7 +64,7 @@ export async function earningsCalendars(
     };
   };
 
-  return { jp: await pick('cal-jp', 'JP'), us: await pick('cal-us', 'US') };
+  return { jp: await pick('cal-jp', 'JP'), us: await pick('cal-us', 'US'), today };
 }
 
 const EMPTY_NOTE =
@@ -71,14 +72,22 @@ const EMPTY_NOTE =
 
 /** 2 枚ぶんの HTML を組み立てる。 */
 export function renderCalendars(
-  data: { jp: CalendarData; us: CalendarData },
+  data: { jp: CalendarData; us: CalendarData; today?: string },
   basePath: string,
 ): { jp: string; us: string } {
   // **1 件も無い市場は、枠ごと出さない。** 公開ページに空の升目を
   // 並べても何も伝わらない。取り込みが始まれば自動的に現れる。
   const one = (d: CalendarData, title: string, anchor: string) =>
     d.any
-      ? calendarSection({ title, ...d, basePath, anchor, emptyNote: EMPTY_NOTE, truncated: d.truncated })
+      ? calendarSection({
+          title,
+          ...d,
+          basePath,
+          anchor,
+          emptyNote: EMPTY_NOTE,
+          truncated: d.truncated,
+          ...(data.today === undefined ? {} : { today: data.today }),
+        })
       : '';
   return {
     jp: one(data.jp, '日本株 決算発表カレンダー', 'cal-jp'),

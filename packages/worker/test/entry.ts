@@ -29,8 +29,8 @@ export {
 export { resolveSite, normalisePath, lpBasePath, appUrl } from '../src/site.js';
 export { normaliseEmail } from '../src/routes/waitlist.js';
 export { lpPage } from '../src/ui/lp.js';
-export { parseMonth, formatMonth, shiftMonth, monthGrid, calendarSection, CALENDAR_CSS } from '../src/ui/calendar.js';
+export { parseMonth, formatMonth, shiftMonth, monthGrid, calendarSection, sessionKey, legendKeys, CALENDAR_CSS } from '../src/ui/calendar.js';
 export { earningsCalendars, renderCalendars } from '../src/routes/lp.js';
-export { TOKENS, BRAND, FONT_STACK, LP_FONT_STACK } from '../src/ui/tokens.js';
+export { TOKENS, BRAND, CALENDAR_TOKENS, FONT_STACK, LP_FONT_STACK } from '../src/ui/tokens.js';
 export { CSP, LP_CSP, SECURITY_HEADERS, withSecurityHeaders } from '../src/headers.js';
 export { csvCell } from '../src/routes/waitlistAdmin.js';

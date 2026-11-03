@@ -118,3 +118,37 @@ export const BRAND = `
   --brand-shadow-3: 0 8px 30px rgba(0, 0, 0, .06);
 }
 `;
+
+/**
+ * 決算カレンダーの色。**ここが唯一の定義**（`ui/calendar.ts` で色を書かない）。
+ *
+ * 分類は**発表の時間帯だけ**にしてある。いま持っているデータで
+ * 確実に言えるのがこれしかないため——Finnhub の `hour` は
+ * `bmo` / `amc` / 空 の 3 通りしか実測できていない（`docs/DATA-SOURCES.md` §6）。
+ * **業種やテーマで色を分けない。** 分類の根拠が無いまま色を付けると、
+ * 見た人が意味を読み取ってしまう。
+ *
+ * `during`（場中）は Finnhub の出力では一度も観測していないが、
+ * 綴りとしては存在しうるので色だけ用意してある。
+ *
+ * 明暗で変えない。LP は `color-scheme: light` 固定（`BRAND` と同じ理由）。
+ */
+export const CALENDAR_TOKENS = `
+:root {
+  /* 曜日。日曜を赤、土曜を青にするのは日本のカレンダーの慣習 */
+  --cal-sun: #d64545;
+  --cal-sat: #2f80c4;
+  --cal-sun-bg: #fdf4f4;
+  --cal-sat-bg: #f3f8fc;
+
+  /* 発表の時間帯。地と文字で 1 組 */
+  --cal-before-bg: #e8f2fb;   /* 寄前 */
+  --cal-before-ink: #1d6ca8;
+  --cal-after-bg: #fff0e4;    /* 引後 */
+  --cal-after-ink: #c4560f;
+  --cal-during-bg: #e8f6ed;   /* 場中 */
+  --cal-during-ink: #1e7a46;
+  --cal-none-bg: #eef0f3;     /* 時間未定 */
+  --cal-none-ink: #5f6b7a;
+}
+`;

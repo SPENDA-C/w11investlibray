@@ -6,6 +6,8 @@ import {
   shiftMonth,
   monthGrid,
   calendarSection,
+  sessionKey,
+  legendKeys,
   handler,
 } from '../.build/worker.mjs';
 import { makeEnv } from './helpers/d1.mjs';
@@ -45,18 +47,31 @@ test('shiftMonth — 年をまたぐ', () => {
 // **曜日がずれるのが一番こわい。** 月初の余白を間違えると、
 // 全部の日付が 1 列ずれて表示される。見た目では気付きにくい。
 
-test('monthGrid — 月曜はじまりで、先頭の余白が合う', () => {
-  // 2026-11-01 は日曜。月曜はじまりなら前に 6 個の余白が要る。
+test('monthGrid — 日曜はじまりの月は余白ゼロ', () => {
+  // 2026-11-01 は日曜。日曜はじまりなので先頭に余白は要らない。
   const cells = monthGrid(2026, 11, []);
-  const lead = cells.findIndex((c) => c.date !== null);
-  assert.equal(lead, 6, `先頭の余白が ${lead} 個`);
-  assert.equal(cells[6].date, '2026-11-01');
+  assert.equal(cells[0].date, '2026-11-01', '日曜はじまりなのに余白がある');
 });
 
-test('monthGrid — 月曜はじまりの月は余白ゼロ', () => {
-  // 2026-06-01 は月曜。
+test('monthGrid — 月曜はじまりの月は余白ひとつ', () => {
+  // 2026-06-01 は月曜。日曜ぶんの余白が 1 個だけ入る。
   const cells = monthGrid(2026, 6, []);
-  assert.equal(cells[0].date, '2026-06-01', '月曜はじまりなのに余白がある');
+  const lead = cells.findIndex((c) => c.date !== null);
+  assert.equal(lead, 1, `先頭の余白が ${lead} 個`);
+  assert.equal(cells[1].date, '2026-06-01');
+});
+
+test('monthGrid — 曜日の列が実際の曜日と一致する', () => {
+  // **ここがずれると全部の日付が 1 列ずれる。** 見た目では気付きにくいので、
+  // 実物の曜日（UTC）と突き合わせる。
+  for (const [y, m] of [[2026, 11], [2026, 6], [2028, 2], [2027, 1]]) {
+    const cells = monthGrid(y, m, []);
+    for (const [i, c] of cells.entries()) {
+      if (c.date === null) continue;
+      const real = new Date(`${c.date}T00:00:00Z`).getUTCDay();
+      assert.equal(i % 7, real, `${c.date} が ${i % 7} 列目（実際は ${real}）`);
+    }
+  }
 });
 
 test('monthGrid — 升目は必ず 7 の倍数', () => {
@@ -132,6 +147,74 @@ test('calendarSection — 銘柄名を HTML エスケープする', () => {
   });
   assert.ok(!/<img/i.test(html), '銘柄名がエスケープされていない');
   assert.match(html, /&lt;img/);
+});
+
+// ---- 分類（時間帯だけ） -------------------------------------------------------
+//
+// **これが唯一の分類。** 業種やテーマで色を分ける根拠は持っていない。
+
+test('sessionKey — 知らない綴りを勝手な区分にしない', () => {
+  assert.equal(sessionKey('before'), 'before');
+  assert.equal(sessionKey('after'), 'after');
+  assert.equal(sessionKey('during'), 'during');
+  assert.equal(sessionKey(null), 'none', 'null が時間未定になっていない');
+  // Finnhub で実測していない綴りが来ても、作り話をせず「時間未定」に倒す。
+  assert.equal(sessionKey('dmh'), 'none');
+  assert.equal(sessionKey('bmo'), 'none', '生の綴りがそのまま通っている');
+  assert.equal(sessionKey('none'), 'none');
+});
+
+test('legendKeys — その月に出てこない区分は凡例に出さない', () => {
+  // 1 件も無い区分を凡例に並べると「あるのに表示されていない」と読める。
+  assert.deepEqual(legendKeys([entry('1', '2026-11-05', 'after')]), ['after']);
+  assert.deepEqual(
+    legendKeys([entry('1', '2026-11-05', 'after'), entry('2', '2026-11-06')]),
+    ['after', 'none'],
+  );
+  assert.deepEqual(legendKeys([]), []);
+});
+
+test('calendarSection — 凡例と中身の区分が食い違わない', () => {
+  const html = calendarSection({
+    title: 'x', year: 2026, month: 11,
+    entries: [entry('72030', '2026-11-05', 'after'), entry('67580', '2026-11-06')],
+    basePath: '', anchor: 'cal-jp', emptyNote: '',
+  });
+  assert.match(html, /cal-p cal-p-after/, '引後の色が付いていない');
+  assert.match(html, /cal-p cal-p-none/, '時間未定の色が付いていない');
+  assert.match(html, /引後/);
+  assert.match(html, /時間未定/);
+  assert.ok(!/寄前/.test(html), '1 件も無い寄前が凡例に出ている');
+});
+
+test('calendarSection — 日曜と土曜に色の手がかりを付ける', () => {
+  const html = calendarSection({
+    title: 'x', year: 2026, month: 11, entries: [entry('1', '2026-11-05')],
+    basePath: '', anchor: 'cal-jp', emptyNote: '',
+  });
+  // 2026-11-01 は日曜、2026-11-07 は土曜。
+  assert.match(html, /class="cal-h cal-sun">日</, '日曜の見出しに印が無い');
+  assert.match(html, /class="cal-h cal-sat">土</, '土曜の見出しに印が無い');
+});
+
+test('calendarSection — 件数の数字は実際の件数と一致する', () => {
+  const entries = Array.from({ length: 9 }, (_, i) => entry(`X${i}`, '2026-11-05'));
+  const html = calendarSection({
+    title: 'x', year: 2026, month: 11, entries,
+    basePath: '', anchor: 'cal-jp', emptyNote: '',
+  });
+  assert.match(html, /<span class="cal-n">9<\/span>/, '升目の件数が合っていない');
+  assert.match(html, /ほか 5 件/, '表示しきれないぶんの数が合っていない');
+});
+
+test('calendarSection — 今日が別の月でも落ちない／当月なら印が付く', () => {
+  const base = {
+    title: 'x', year: 2026, month: 11, entries: [entry('1', '2026-11-05')],
+    basePath: '', anchor: 'cal-jp', emptyNote: '',
+  };
+  assert.match(calendarSection({ ...base, today: '2026-11-05' }), /cal-today/);
+  assert.ok(!/cal-today/.test(calendarSection({ ...base, today: '2027-03-01' })));
+  assert.ok(!/cal-today/.test(calendarSection(base)));
 });
 
 // ---- LP に出ること -----------------------------------------------------------
