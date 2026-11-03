@@ -119,7 +119,11 @@ D1 に流す workflow は、落ちたとき自動でこれを走らせる。
 | `cfat_`（アカウント所有） | `https://dash.cloudflare.com/<アカウント ID>/api-tokens` |
 | `cfut_`（ユーザー所有） | `https://dash.cloudflare.com/profile/api-tokens` |
 
+足す場所は、**ゾーンではなくアカウント全体の権限ポリシー**（「○○'s Account
+アカウント全体」と書いてある箱）の中。そこに `D1` の `Write` を 1 つ足す。
+
 権限を足しても**トークンの値は変わらない**ので、GitHub の Secret は貼り直さなくてよい。
+**「再生成」「ロール」は押さないこと**——押すと値が変わって Secret が合わなくなる。
 
 **`wrangler.toml` に API キーを書かないこと。**
 
