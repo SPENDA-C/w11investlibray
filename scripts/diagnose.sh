@@ -46,9 +46,14 @@ expect() {
   else ng "${got}" "${label}（期待 ${want}）"; fi
 }
 
-echo '[1] LP が開いていること'
-expect 'トップ'     "${LP_URL}/"           '200'
-expect 'robots.txt' "${LP_URL}/robots.txt" '200'
+# **apex の `/` はもうこの Worker のものではない。**
+# goldencross-incomegains.com の `/` と記事は別リポジトリの Worker
+# （w10cloudflare の apps/fxstock）が持っている。こちらが apex に
+# 残しているのは /privacy・/api/waitlist・/api/health の 3 本だけなので、
+# **その 3 本だけを見る。** `/` や robots.txt を見ても、向こうの Worker が
+# 生きているかを確かめているだけになる。
+echo '[1] この Worker が apex に残した経路が開いていること'
+expect 'プライバシーポリシー' "${LP_URL}/privacy" '200'
 
 # **/api/health は 200 とは限らない。** 更新が止まっていると 503 を返す
 # （監視から失敗として見えるように、意図してそうしてある）。
@@ -59,14 +64,18 @@ case "${health_status}" in
   *)       ng "${health_status}" '監視用 /api/health（期待 200 か 503）' ;;
 esac
 
-# sitemap は絶対 URL を組めないと 404 を返す。ローカルではそれが正しい。
+# robots.txt / sitemap.xml は **apex を持っている向こうの Worker の持ち物**。
+# ローカル（LP_HOSTNAME が空）ではこちらが返すので、そのときだけ見る。
 sitemap_status=$(status_of "${LP_URL}/sitemap.xml")
+robots_status=$(status_of "${LP_URL}/robots.txt")
 if [[ "${mode}" == prod ]]; then
-  [[ "${sitemap_status}" == '200' ]] \
-    && ok "${sitemap_status}" 'sitemap.xml' \
-    || ng "${sitemap_status}" 'sitemap.xml（期待 200）'
+  skip "${sitemap_status}" 'sitemap.xml — apex を持つ別の Worker の持ち物'
+  skip "${robots_status}"  'robots.txt — 同上'
 else
   skip "${sitemap_status}" 'sitemap.xml — ローカルでは 404 が正しい'
+  [[ "${robots_status}" == '200' ]] \
+    && ok "${robots_status}" 'robots.txt' \
+    || ng "${robots_status}" 'robots.txt（期待 200）'
 fi
 
 # **先行登録の受け口が edge で塞がれていないこと。**
@@ -92,7 +101,7 @@ case "${signup_status}" in
   *)   ng "${signup_status}" '先行登録の受け口が想定外（期待 405）' ;;
 esac
 
-csp=$(curl -sSI --max-time 15 "${LP_URL}/" 2>/dev/null | tr -d '\r' | grep -i '^content-security-policy:' || true)
+csp=$(curl -sSI --max-time 15 "${LP_URL}/privacy" 2>/dev/null | tr -d '\r' | grep -i '^content-security-policy:' || true)
 if [[ -z "${csp}" ]]; then
   echo '  NG   CSP ヘッダが無い'
   fail=1
@@ -104,8 +113,10 @@ else
 fi
 echo
 
-echo '[2] LP から取れてはいけないもの'
-# **ここがこの構成の要。** LP 側のルーティングに 1 行足すと漏れる。
+echo '[2] apex から取れてはいけないもの'
+# **ここがこの構成の要。** apex のルートを 1 本広げると漏れる。
+# いまは 3 本の完全一致だけなので構造的に届かないが、
+# `goldencross-incomegains.com/*` を足した瞬間に全部つながる。
 expect 'ランキング（404 のはず）'   "${LP_URL}/api/ranking"       '404'
 expect 'スクリーナー（404 のはず）' "${LP_URL}/screener"          '404'
 expect '銘柄 API（404 のはず）'     "${LP_URL}/api/symbol/X"      '404'

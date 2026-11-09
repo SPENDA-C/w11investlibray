@@ -92,22 +92,39 @@ JQUANTS_FIELD_ALIASES = "{}"
 [env.production]
 workers_dev = false
 
-[[env.production.routes]]                          # LP（公開）
-pattern = "goldencross-incomegains.com/*"
+# **apex は手放した。** goldencross-incomegains.com の `/` と記事は
+# 別リポジトリの Worker（spenda-agency/w10cloudflare の apps/fxstock、
+# Astro + EmDash）が持っている。
+#
+# この Worker が apex に残しているのは下の 4 本だけ。
+# **Cloudflare はワイルドカードより具体的なルートを優先する**ので、
+# 向こうの `goldencross-incomegains.com/*` よりこちらが先に当たる。
+#
+# 残した理由:
+#   /privacy       メールアドレスを集めた根拠。URL を変えない
+#   /api/waitlist  先行登録の受け口。貼られたリンクを生かす
+#   /api/health    監視とデプロイ後の疎通確認が指している
+#
+# **末尾スラッシュ付きも書く。** 完全一致のルートは `/privacy/` に
+# 当たらない。`/privacy*` にすると `/privacy-policy` まで巻き込む。
+[[env.production.routes]]
+pattern = "goldencross-incomegains.com/privacy"
+zone_name = "goldencross-incomegains.com"
+
+[[env.production.routes]]
+pattern = "goldencross-incomegains.com/privacy/"
+zone_name = "goldencross-incomegains.com"
+
+[[env.production.routes]]
+pattern = "goldencross-incomegains.com/api/waitlist"
+zone_name = "goldencross-incomegains.com"
+
+[[env.production.routes]]
+pattern = "goldencross-incomegains.com/api/health"
 zone_name = "goldencross-incomegains.com"
 
 [[env.production.routes]]                          # ダッシュボード（Access の後ろ）
 pattern = "app.goldencross-incomegains.com/*"
-zone_name = "goldencross-incomegains.com"
-
-# www は apex へ 301 で寄せる（site.ts の resolveSite）。
-#
-# **DNS 側に www のレコードが要る。** 無いとリクエストが Cloudflare まで
-# 届かないので、このルートは当たらない（害は無いが効きもしない）。
-# Cloudflare の DNS に www の CNAME（内容 goldencross-incomegains.com・
-# プロキシ オン）を足して初めて有効になる。
-[[env.production.routes]]
-pattern = "www.goldencross-incomegains.com/*"
 zone_name = "goldencross-incomegains.com"
 
 [[env.production.d1_databases]]

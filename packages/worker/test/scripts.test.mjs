@@ -152,6 +152,7 @@ test('diagnose.sh と .ps1 が同じ経路を検査している', () => {
     '/api/ranking', '/screener', '/api/symbol/X',
     '/waitlist', '/api/waitlist.csv',        // ← 漏れるとメールアドレスが公開される
     '/robots.txt', '/sitemap.xml', '/api/health',
+    '/privacy',                              // ← apex に残した 3 本のうちの 1 つ
   ];
   for (const p of paths) {
     assert.ok(sh.includes(p), `diagnose.sh が ${p} を見ていない`);

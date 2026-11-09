@@ -82,13 +82,37 @@ if (prod !== null) {
   }
 
   const patterns = [...prodBlock.matchAll(/^pattern = "([^"]+)"/gm)].map((m) => m[1]);
-  for (const key of ['LP_HOSTNAME', 'APP_HOSTNAME']) {
-    const host = prod[key];
-    if (host && !patterns.includes(`${host}/*`)) {
+
+  // アプリ側はホストごと持っている。ここが無いとダッシュボードが出ない。
+  const app = prod['APP_HOSTNAME'];
+  if (app && !patterns.includes(`${app}/*`)) {
+    errors.push([
+      `${app} のルートが無い`,
+      `[[env.production.routes]] に pattern = "${app}/*" を足す`,
+    ]);
+  }
+
+  // **apex はホストごとは持っていない。**
+  // `/` と記事は別リポジトリの Worker（w10cloudflare の apps/fxstock）。
+  // こちらが残しているのは URL を変えたくない 3 本だけ。
+  // ここを `${lp}/*` にすると、向こうのトップページを丸ごと飲み込む。
+  const lp = prod['LP_HOSTNAME'];
+  if (lp) {
+    if (patterns.includes(`${lp}/*`)) {
       errors.push([
-        `${host} のルートが無い`,
-        `[[env.production.routes]] に pattern = "${host}/*" を足す`,
+        `${lp}/* を取り返している`,
+        'apex の / と記事は別の Worker（apps/fxstock）が持っている。\n' +
+          '    ワイルドカードを書くと、具体的なルートとしてこちらが勝ち、\n' +
+          '    向こうのトップページが出なくなる。残すのは完全一致の 3 本だけ。',
       ]);
+    }
+    for (const path of ['/privacy', '/api/waitlist', '/api/health']) {
+      if (!patterns.includes(`${lp}${path}`)) {
+        errors.push([
+          `${lp}${path} のルートが無い`,
+          `[[env.production.routes]] に pattern = "${lp}${path}" を足す`,
+        ]);
+      }
     }
   }
 

@@ -64,8 +64,8 @@ function Test-Status {
 }
 
 Write-Host "[1] LP が開いていること"
-Test-Status "トップ"     "$LpUrl/"           200
-Test-Status "robots.txt" "$LpUrl/robots.txt" 200
+# apex の `/` はもうこの Worker のものではない（diagnose.sh と同じ理由）。
+Test-Status "プライバシーポリシー" "$LpUrl/privacy" 200
 
 # **/api/health は 200 とは限らない。** 更新が止まっていると 503 を返す
 # （監視から失敗として見えるように、意図してそうしてある）。
@@ -77,13 +77,16 @@ if ($healthStatus -eq 200 -or $healthStatus -eq 503) {
     Write-Ng $healthStatus "監視用 /api/health（期待 200 か 503）"
 }
 
-# sitemap は絶対 URL を組めないと 404 を返す。ローカルではそれが正しい。
+# robots.txt / sitemap.xml は apex を持っている別の Worker の持ち物。
+$robotsStatus = Get-Status "$LpUrl/robots.txt"
 $sitemapStatus = Get-Status "$LpUrl/sitemap.xml"
 if ($mode -eq "prod") {
-    if ($sitemapStatus -eq 200) { Write-Ok $sitemapStatus "sitemap.xml" }
-    else { Write-Ng $sitemapStatus "sitemap.xml（期待 200）" }
+    Write-Skip $sitemapStatus "sitemap.xml — apex を持つ別の Worker の持ち物"
+    Write-Skip $robotsStatus "robots.txt — 同上"
 } else {
     Write-Skip $sitemapStatus "sitemap.xml — ローカルでは 404 が正しい"
+    if ($robotsStatus -eq 200) { Write-Ok $robotsStatus "robots.txt" }
+    else { Write-Ng $robotsStatus "robots.txt（期待 200）" }
 }
 
 # **先行登録の受け口が edge で塞がれていないこと。**
@@ -115,7 +118,7 @@ if ($signupStatus -eq 405) {
 
 $csp = $null
 try {
-    $head = Invoke-WebRequest -Uri "$LpUrl/" -Method GET -TimeoutSec 15 `
+    $head = Invoke-WebRequest -Uri "$LpUrl/privacy" -Method GET -TimeoutSec 15 `
         -UseBasicParsing -ErrorAction Stop
     $csp = $head.Headers["Content-Security-Policy"]
 } catch {

@@ -69,11 +69,31 @@ test('本番のルートは、意図した宛先だけ', () => {
   const lp = prod['LP_HOSTNAME'].replaceAll('"', '');
   const app = prod['APP_HOSTNAME'].replaceAll('"', '');
 
-  assert.ok(patterns.includes(`${lp}/*`), `LP のルートが無い: ${patterns.join(', ')}`);
   assert.ok(patterns.includes(`${app}/*`), `アプリのルートが無い: ${patterns.join(', ')}`);
 
-  // www は apex へ 301 で寄せる（site.ts）。あってよい。
-  const allowed = new Set([`${lp}/*`, `${app}/*`, `www.${lp}/*`, `www.${app}/*`]);
+  // **apex は別の Worker（別リポジトリ）が持っている。**
+  // こちらが残しているのは、URL を変えたくない 3 つだけ。
+  // ワイルドカードで apex を取り返すと、向こうのトップページを
+  // 丸ごと飲み込む（Cloudflare は具体的なルートを優先するため、
+  // `${lp}/*` を書いた瞬間にこちらが勝ってしまう）。
+  assert.ok(
+    !patterns.includes(`${lp}/*`),
+    `apex をワイルドカードで取り返している: ${patterns.join(', ')}`,
+  );
+  for (const path of ['/privacy', '/api/waitlist', '/api/health']) {
+    assert.ok(
+      patterns.includes(`${lp}${path}`),
+      `${path} のルートが無い: ${patterns.join(', ')}`,
+    );
+  }
+
+  const allowed = new Set([
+    `${app}/*`,
+    `${lp}/privacy`,
+    `${lp}/privacy/`,
+    `${lp}/api/waitlist`,
+    `${lp}/api/health`,
+  ]);
   const unexpected = patterns.filter((p) => !allowed.has(p));
   assert.deepEqual(unexpected, [], `意図しないルートがある: ${unexpected.join(', ')}`);
 

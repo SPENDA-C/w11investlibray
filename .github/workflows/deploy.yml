@@ -180,34 +180,43 @@ jobs:
       # **出した版が本当に出ているかを見る。**
       # デプロイが緑でも、配信されているのが古い版だったことがある
       # （デプロイのステップごと消えていた）。/api/health は中身が変わらない
-      # ので気付けない。**公開ページの中身そのものを見る。**
+      # ので気付けない。**この Worker が出すページの中身そのものを見る。**
+      #
+      # **宛先は /privacy。** apex の `/` は別リポジトリの Worker
+      # （apps/fxstock）が持っているので、そちらを見てもこの Worker の
+      # 版は分からない。/privacy はこちらが持ち続けている。
       - name: 出した版が配信されているか
         run: |
-          url="https://goldencross-incomegains.com/"
+          url="https://goldencross-incomegains.com/privacy"
           curl -sS --max-time 20 -H 'cache-control: no-cache' "$url?v=${GITHUB_SHA}" > /tmp/lp.html || true
           bytes=$(wc -c < /tmp/lp.html)
           echo "取得 ${bytes} バイト"
 
-          # いまのコードが必ず出す印。無ければ、配信されているのは別の版。
+          # いまのコードが必ず出す印。無ければ、配信されているのは別の版か、
+          # ルートが別の Worker に奪われている。
           node -e '
             const { readFileSync } = require("node:fs");
             const live = readFileSync("/tmp/lp.html", "utf8");
-            const marks = [".container", ".site-head"];
+            const marks = ["プライバシーポリシー", "株式会社SPENDA"];
             const missing = marks.filter((m) => !live.includes(m));
             if (missing.length > 0) {
-              console.log("::error::公開ページに " + missing.join(", ") + " が無い。LP が配信されていない");
+              console.log("::error::/privacy に " + missing.join(", ") + " が無い。");
+              console.log("  この Worker が配信していない。ルートが別の Worker に");
+              console.log("  取られていないか確認する（apex は apps/fxstock が持っている）。");
               process.exit(1);
             }
-            console.log("公開ページは LP を返している");
+            console.log("/privacy はこの Worker が返している");
           '
 
-      # **LP に JavaScript と外部通信を増やさない**（CLAUDE.md）。
+      # **この Worker が出すページに JavaScript と外部通信を増やさない**
+      # （CLAUDE.md）。見ているのは /privacy。apex の `/` は別の Worker の
+      # ものなので、そちらに script があっても、この検査の対象ではない。
       # コード側は test が見ているが、**Cloudflare が配信時に足すものは
       # コードからは見えない。** Zaraz や Web Analytics を管理画面で
       # 有効にすると、ここに <script> が差し込まれる。
       # /privacy に「解析タグは設置していません」と書いてあるので、
       # 差し込まれたままだとその記述が事実と違うことになる。
-      - name: LP に script と外部通信が増えていないか
+      - name: /privacy に script と外部通信が増えていないか
         run: |
           node -e '
             const { readFileSync } = require("node:fs");
@@ -217,7 +226,7 @@ jobs:
             const scripts = live.match(/<script\b/gi) ?? [];
             if (scripts.length > 0) {
               bad = 1;
-              console.log("::warning::公開ページに <script> が " + scripts.length + " 個ある（コード側は 0）");
+              console.log("::warning::/privacy に <script> が " + scripts.length + " 個ある（コード側は 0）");
               for (const m of live.matchAll(/<script[^>]*src="([^"]+)"/gi)) console.log("    src: " + m[1]);
               if (/zaraz/i.test(live)) console.log("    → Cloudflare Zaraz。ダッシュボード → 対象ゾーン → Zaraz で無効化");
               if (/cloudflareinsights/i.test(live)) console.log("    → Cloudflare Web Analytics。Analytics → Web Analytics でサイトを外す");
@@ -229,9 +238,9 @@ jobs:
             const extra = [...hosts].filter((h) => !allowed.some((a) => h === a || h.endsWith("." + a)));
             if (extra.length > 0) {
               bad = 1;
-              console.log("::warning::許していない外部ホストが公開ページにある: " + extra.join(", "));
+              console.log("::warning::許していない外部ホストが /privacy にある: " + extra.join(", "));
             }
 
-            if (bad === 0) console.log("LP に script は無く、外部は Google Fonts だけ");
+            if (bad === 0) console.log("/privacy に script は無く、外部も増えていない");
             else console.log("詳細: CLAUDE.md の「画面まわり」と /privacy の「外部サービス」");
           '
