@@ -217,7 +217,12 @@ test('calendarSection — 今日が別の月でも落ちない／当月なら印
   assert.ok(!/cal-today/.test(calendarSection(base)));
 });
 
-// ---- LP に出ること -----------------------------------------------------------
+// ---- LP のトップには出さない ------------------------------------------------
+//
+// **カレンダーは TOP ページから外した。** 出し先は別サイトの
+// 「最新記事」の位置。LP のルーティングから市場データを読む経路も
+// 外してある（routes/lp.ts のコメント「ここから市場データに触れる経路を
+// 作らないこと」を、実際にそうした形に戻した）。
 
 /** symbols と earnings_calendar に 1 件入れる。 */
 async function seed(env, symbolId, market, code, name, date) {
@@ -231,28 +236,70 @@ async function seed(env, symbolId, market, code, name, date) {
   ).bind(symbolId, date).run();
 }
 
-test('データが 1 件も無い市場は、枠ごと出さない', async () => {
-  // **公開 LP に空の升目を並べない。** 訪問者には作りかけに見えるだけで、
-  // 何も伝わらない。取り込みが始まれば自動的に現れる。
-  const env = makeEnv(HOSTS);
-  const html = await (await handler.fetch(req('https://invest.example/'), env, ctx)).text();
-  assert.ok(!html.includes('id="cal-jp"'), 'データが無いのにカレンダーが出ている');
-  assert.ok(!html.includes('id="cal-us"'), 'データが無いのにカレンダーが出ている');
-});
-
-test('データがある市場だけカレンダーが出る', async () => {
+test('データがあっても、LP のトップにカレンダーを出さない', async () => {
   const env = makeEnv(HOSTS);
   await seed(env, 'JP.72030', 'JP', '7203', 'トヨタ自動車', '2026-11-05');
+  await seed(env, 'US.NVDA', 'US', 'NVDA', 'NVIDIA', '2026-11-05');
   const html = await (await handler.fetch(req('https://invest.example/'), env, ctx)).text();
-  assert.match(html, /id="cal-jp"/, '日本株のカレンダーが出ていない');
-  assert.ok(!html.includes('id="cal-us"'), '米国株は空なのに出ている');
+
+  for (const mark of ['id="cal-jp"', 'id="cal-us"', 'cal-grid', '--cal-sun', 'トヨタ自動車']) {
+    assert.ok(!html.includes(mark), `LP のトップに ${mark} が残っている`);
+  }
 });
 
-test('実際の量（1 か月 500 件超）で、件数を切り捨てずに出す', async () => {
+test('月を指定するクエリを付けても、LP のトップには出てこない', async () => {
+  const env = makeEnv(HOSTS);
+  await seed(env, 'US.NVDA', 'US', 'NVDA', 'NVIDIA', '2026-11-05');
+  for (const q of ['?cal-us=2026-11', '?cal-jp=2026-13', '?cal-jp=../../etc']) {
+    const res = await handler.fetch(req(`https://invest.example/${q}`), env, ctx);
+    assert.equal(res.status, 200, q);
+    assert.ok(!(await res.text()).includes('cal-grid'), `${q} でカレンダーが出ている`);
+  }
+});
+
+test('LP のトップは決算の表を読まない', async () => {
+  // **ここが肝心。** 出さないだけでなく、読みにも行かない。
+  // 公開ページから市場データへの経路を残さないための検査。
+  const env = makeEnv(HOSTS);
+  const seen = [];
+  const real = env.INVEST_DB.prepare.bind(env.INVEST_DB);
+  env.INVEST_DB.prepare = (sql) => { seen.push(sql); return real(sql); };
+
+  await handler.fetch(req('https://invest.example/'), env, ctx);
+  const touched = seen.filter((sql) => /earnings_calendar/i.test(sql));
+  assert.deepEqual(touched, [], `LP が決算の表を読んでいる: ${touched.join(' / ')}`);
+
+  // **この検査が空振りしていないことを、同じ仕掛けで確かめる。**
+  // prepare を拾えていなければ上の 0 件は何も意味しない。
+  const { earningsCalendars } = await import('../.build/worker.mjs');
+  await earningsCalendars(env, new URL('https://x/'));
+  assert.ok(
+    seen.some((sql) => /earnings_calendar/i.test(sql)),
+    'prepare を観測できていない。上の「0 件」は検査になっていない',
+  );
+});
+
+// ---- 組み立て（出し先がどこでも同じ） -----------------------------------------
+//
+// LP から外したので、画面ごしではなく組み立ての関数を直接見る。
+
+test('データがある市場だけ枠を出す', async () => {
+  const { earningsCalendars, renderCalendars } = await import('../.build/worker.mjs');
+  const env = makeEnv(HOSTS);
+  await seed(env, 'JP.72030', 'JP', '7203', 'トヨタ自動車', '2026-11-05');
+
+  const data = await earningsCalendars(env, new URL('https://x/'), new Date('2026-11-03T00:00:00Z'));
+  const { jp, us } = renderCalendars(data, '');
+  assert.match(jp, /id="cal-jp"/, '日本株の枠が出ていない');
+  assert.equal(us, '', '米国株は空なのに枠が出ている');
+});
+
+test('実際の量（1 か月 500 件超）で、件数を切り捨てない', async () => {
   // **実測で 1 か月 510 件あった。** 上限を 400 にしていたせいで
   // 「400 件」と表示し、さらに ORDER BY announce_date のせいで
   // **月末の数日が丸ごと消えていた。** 切り捨てた数を事実として
   // 出すのが、このプロジェクトで一番やらないこと。
+  const { earningsCalendars, renderCalendars } = await import('../.build/worker.mjs');
   const env = makeEnv(HOSTS);
   for (let d = 1; d <= 30; d += 1) {
     const date = `2026-11-${String(d).padStart(2, '0')}`;
@@ -260,18 +307,16 @@ test('実際の量（1 か月 500 件超）で、件数を切り捨てずに出�
       await seed(env, `US.T${d}X${i}`, 'US', `T${d}X${i}`, `銘柄${d}-${i}`, date);
     }
   }
-  const html = await (
-    await handler.fetch(req('https://invest.example/?cal-us=2026-11'), env, ctx)
-  ).text();
+  const data = await earningsCalendars(env, new URL('https://x/?cal-us=2026-11'));
+  const { us } = renderCalendars(data, '');
 
-  assert.match(html, /発表予定 510 件/, '切り捨てた数を出している');
-  assert.ok(!/発表予定 400 件/.test(html));
+  assert.match(us, /発表予定 510 件/, '切り捨てた数を出している');
+  assert.ok(!/発表予定 400 件/.test(us));
   // 月末も残っていること（消えるのは件数だけではない）
-  assert.match(html, /T30X0/, '月末の銘柄が落ちている');
+  assert.match(us, /T30X0/, '月末の銘柄が落ちている');
 });
 
 test('上限に達したら、件数を断定しない', async () => {
-  const { calendarSection } = await import('../.build/worker.mjs');
   const entries = Array.from({ length: 3 }, (_, i) => ({
     symbolId: `US.X${i}`, code: `X${i}`, name: `X${i}`,
     announceDate: '2026-11-05', session: null,
@@ -291,20 +336,21 @@ test('上限に達したら、件数を断定しない', async () => {
 });
 
 test('当月が空でも、データがあれば枠は残す（翌月に送れるように）', async () => {
+  const { earningsCalendars, renderCalendars } = await import('../.build/worker.mjs');
   const env = makeEnv(HOSTS);
   await seed(env, 'JP.72030', 'JP', '7203', 'トヨタ自動車', '2026-12-05');
-  const html = await (
-    await handler.fetch(req('https://invest.example/?cal-jp=2026-11'), env, ctx)
-  ).text();
-  assert.match(html, /id="cal-jp"/, '当月が空なだけで枠ごと消えている');
-  assert.match(html, /2026年12月/, '翌月への導線が無い');
+  const data = await earningsCalendars(env, new URL('https://x/?cal-jp=2026-11'));
+  const { jp } = renderCalendars(data, '');
+  assert.match(jp, /id="cal-jp"/, '当月が空なだけで枠ごと消えている');
+  assert.match(jp, /2026年12月/, '翌月への導線が無い');
 });
 
-test('月の指定が壊れていても落ちない', async () => {
+test('壊れた月の指定でも例外にしない', async () => {
+  const { earningsCalendars } = await import('../.build/worker.mjs');
   const env = makeEnv(HOSTS);
   for (const q of ['?cal-jp=2026-13', '?cal-jp=../../etc', '?cal-jp=']) {
-    const res = await handler.fetch(req(`https://invest.example/${q}`), env, ctx);
-    assert.equal(res.status, 200, q);
+    const data = await earningsCalendars(env, new URL(`https://x/${q}`));
+    assert.equal(typeof data.jp.year, 'number', q);
   }
 });
 

@@ -1,6 +1,5 @@
 import { escapeHtml } from './format.js';
-import { CALENDAR_CSS } from './calendar.js';
-import { BRAND, CALENDAR_TOKENS, LP_FONT_STACK, TOKENS } from './tokens.js';
+import { BRAND, LP_FONT_STACK, TOKENS } from './tokens.js';
 
 /**
  * 先行登録の LP。**市場データを一切出さない公開ページ。**
@@ -38,12 +37,6 @@ export interface LpOptions {
   /** LP の絶対 URL。canonical と OGP に使う。ローカルでは空。 */
   readonly canonicalUrl?: string;
   /** 送信後の再表示。`ok` なら完了メッセージ、`error` なら理由を出す。 */
-  /**
-   * 決算カレンダー 2 枚ぶんの HTML。
-   * **routes/lp.ts が組み立てて渡す。** ここで D1 を触らない
-   * （ui/ は描くだけ、という分け方を崩さない）。
-   */
-  readonly calendars?: { readonly jp: string; readonly us: string };
   readonly submitted?: 'ok' | null;
   readonly errorMessage?: string | null;
 }
@@ -82,7 +75,7 @@ export function lpPage(o: LpOptions): string {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&amp;display=swap">
-<style>${TOKENS}${BRAND}${CALENDAR_TOKENS}${STYLES}${CALENDAR_CSS}</style>
+<style>${TOKENS}${BRAND}${STYLES}</style>
 </head>
 <body id="top">
 
@@ -147,9 +140,6 @@ export function lpPage(o: LpOptions): string {
     </div>
   </div>
 </section>
-
-${o.calendars?.jp ?? ''}
-${o.calendars?.us ?? ''}
 
 <section class="band" id="problem">
   <div class="container">
